@@ -1,0 +1,8 @@
+{
+  "name": "Multi-Project Client Portal & Automated KPI Scorecard",
+  "description": "Executive multi-project client portal and automated KPI scorecard engine with Google Sheet sync, project isolation, and PDF/Excel export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
