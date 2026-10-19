@@ -85,25 +85,76 @@ export default function App() {
     }
 
     try {
-      const res = await fetch(url, { headers });
-      const data = await res.json();
+      let data: any = null;
 
-      if (res.status === 401 && data.requiresPin) {
-        setIsPinModalOpen(true);
-        setPinPurpose('portal_unlock');
-        setLoading(false);
-        return;
+      // 1. Try server API endpoint
+      try {
+        const res = await fetch(url, { headers });
+        if (res.status === 401) {
+          const pinData = await res.json().catch(() => ({}));
+          if (pinData.requiresPin) {
+            setIsPinModalOpen(true);
+            setPinPurpose('portal_unlock');
+            setLoading(false);
+            return;
+          }
+        }
+        if (res.ok) {
+          const contentType = res.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            data = await res.json();
+          }
+        }
+      } catch (_) {
+        // Backend API not reachable (e.g. GitHub Pages static hosting)
       }
 
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to load portal data.');
+      // 2. Fallback to static portal-data.json snapshot for GitHub Pages
+      if (!data || !data.records) {
+        const candidatePaths = [
+          './portal-data.json',
+          'portal-data.json',
+          `${import.meta.env.BASE_URL || './'}portal-data.json`.replace('//', '/'),
+          '/zawitco-legal/portal-data.json',
+        ];
+
+        for (const candidate of candidatePaths) {
+          try {
+            const staticRes = await fetch(candidate);
+            if (staticRes.ok) {
+              const parsed = await staticRes.json();
+              if (parsed && Array.isArray(parsed.records)) {
+                data = parsed;
+                break;
+              }
+            }
+          } catch (_) {}
+        }
+      }
+
+      if (!data || !data.records) {
+        throw new Error('Failed to load portal records. Please verify internet connection.');
+      }
+
+      // If client token provided in static mode, filter client-side
+      if (currentToken && data.records) {
+        const decodedToken = decodeURIComponent(currentToken).toLowerCase();
+        // Check if token matches a project name or client label
+        const matched = data.records.filter((r: any) => {
+          const p = (r.project_name || '').toLowerCase();
+          const sp = (r.sub_project_name || '').toLowerCase();
+          return p.includes(decodedToken) || sp.includes(decodedToken) || decodedToken.includes(p);
+        });
+        if (matched.length > 0) {
+          data.records = matched;
+          data.mode = 'client_link';
+        }
       }
 
       setPortalData(data);
 
       // Initialize default active KPI if available
       if (data.kpiElements && data.kpiElements.length > 0) {
-        // Prefer AJEER or HEALTH CARD if available
         const preferred = data.kpiElements.find(
           (k: string) => /ajeer/i.test(k) || /health/i.test(k)
         );

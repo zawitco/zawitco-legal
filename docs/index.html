@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script>
+      (function() {
+        var noisePatterns = [
+          'sender-wallet',
+          'sender_getProviderState',
+          'sender_',
+          'sender-wallet-provider',
+          'Failed to get initial state',
+          'No account exist',
+          'Sender: Failed to get initial state',
+          'Sender:',
+          'chrome-extension://',
+          'moz-extension://',
+          'safari-extension://'
+        ];
+
+        function isNoiseString(str) {
+          if (!str || typeof str !== 'string') return false;
+          for (var i = 0; i < noisePatterns.length; i++) {
+            if (str.indexOf(noisePatterns[i]) !== -1) return true;
+          }
+          return false;
+        }
+
+        function checkNoise(args) {
+          if (!args) return false;
+          var combined = '';
+          for (var i = 0; i < args.length; i++) {
+            var item = args[i];
+            if (!item) continue;
+            var str = '';
+            try {
+              if (typeof item === 'string') {
+                str = item;
+              } else if (item instanceof Error) {
+                str = (item.message || '') + ' ' + (item.stack || '');
+              } else if (typeof item === 'object') {
+                str = JSON.stringify(item);
+              } else {
+                str = String(item);
+              }
+            } catch (e) {
+              try { str = String(item); } catch (_) {}
+            }
+            if (isNoiseString(str)) return true;
+            combined += ' ' + str;
+          }
+          return isNoiseString(combined);
+        }
+
+        // Intercept window message events (capture phase) to stop extension errors before they fire
+        window.addEventListener('message', function(e) {
+          try {
+            var d = e.data;
+            if (!d) return;
+            var s = typeof d === 'string' ? d : JSON.stringify(d);
+            if (isNoiseString(s)) {
+              e.stopImmediatePropagation();
+              if (typeof e.stopPropagation === 'function') e.stopPropagation();
+              if (typeof e.preventDefault === 'function') e.preventDefault();
+            }
+          } catch (_) {}
+        }, true);
+
+        // Filter all console output methods
+        ['error', 'warn', 'info', 'log', 'debug'].forEach(function(method) {
+          var orig = console[method];
+          if (!orig) return;
+          console[method] = function() {
+            if (checkNoise(arguments)) return;
+            return orig.apply(console, arguments);
+          };
+        });
+
+        // Prevent error propagation from extension scripts
+        window.addEventListener('error', function(e) {
+          if (checkNoise([e.message, e.filename, e.error])) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            return true;
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function(e) {
+          if (checkNoise([e.reason])) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            return true;
+          }
+        }, true);
+      })();
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Multi-Project Client Portal &amp; Automated KPI Scorecard</title>
+    <meta name="description" content="Executive multi-project client portal and automated KPI scorecard engine with Google Sheet sync, project isolation, and PDF/Excel export." />
+    <meta property="og:title" content="Multi-Project Client Portal &amp; Automated KPI Scorecard" />
+    <meta property="og:description" content="Executive multi-project client portal and automated KPI scorecard engine with Google Sheet sync, project isolation, and PDF/Excel export." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script type="module" crossorigin src="./assets/index-CVDtQYZf.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-Dlnj-yw_.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
+

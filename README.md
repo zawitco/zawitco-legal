@@ -10,13 +10,34 @@
 
 ---
 
-## 🌐 Live Client Portal
+## 🌐 Live Client Portal & GitHub Pages
 
-Clients can access the live portal directly without any installation:
+Clients can access the live portal directly:
 
 - **Live Application URL**: [Open Live Portal](https://ais-pre-pbrje347yfhlfw2qeg5t4b-846168481117.europe-west2.run.app)
+- **GitHub Pages Portal URL**: [https://zawitco.github.io/zawitco-legal/](https://zawitco.github.io/zawitco-legal/)
 - **Admin Control Center**: Click the **Lock Icon** in the top navigation or navigate to `/admin`
   - **Default Admin PIN**: `123456`
+
+---
+
+## ⚡ GitHub Pages Setup (Fix for Blank Page)
+
+If you are using GitHub Pages, follow these quick steps in your GitHub repository:
+
+### Method A: Deploy from `/docs` folder (Instant, No Actions Needed)
+1. On GitHub, go to your repository: `https://github.com/zawitco/zawitco-legal`
+2. Click **Settings** (tab at top) -> **Pages** (in left sidebar).
+3. Under **Build and deployment** -> **Source**: Select **Deploy from a branch**.
+4. Under **Branch**:
+   - Select **`main`**
+   - In the folder dropdown right next to it, select **`/docs`** (instead of `/ (root)`).
+5. Click **Save**.
+6. Wait 30–60 seconds, and refresh `https://zawitco.github.io/zawitco-legal/`!
+
+### Method B: Deploy with GitHub Actions
+1. Under **Settings** -> **Pages** -> **Source**, choose **GitHub Actions**.
+2. GitHub will automatically detect the `.github/workflows/deploy.yml` workflow, run the build, and publish the site.
 
 ---
 
