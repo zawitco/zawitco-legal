@@ -754,6 +754,7 @@ export default function App() {
         adminPin={adminPin}
         projects={allProjects}
         subProjectsByProject={subProjectsByProject}
+        portalData={portalData}
         onConfigUpdated={() => {
           loadPortalData();
         }}

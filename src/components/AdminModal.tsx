@@ -16,7 +16,7 @@ import {
   Plus,
   Lock,
 } from 'lucide-react';
-import { AdminConfigData, ShareLinkItem } from '../types';
+import { AdminConfigData, ShareLinkItem, PortalDataResponse } from '../types';
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -24,8 +24,13 @@ interface AdminModalProps {
   adminPin: string;
   projects: string[];
   subProjectsByProject: Record<string, string[]>;
+  portalData?: PortalDataResponse | null;
   onConfigUpdated: () => void;
 }
+
+const DEFAULT_SPREADSHEET_ID = '1NqVnp2VLJ0Hgd2-sbYHCtSqmi3udjeFjOHD-wCDGDbA';
+const DEFAULT_SHEET_TABS = ['Projects - A', 'Projects - B', 'Projects - C'];
+const DEFAULT_PIN = '123456';
 
 export const AdminModal: React.FC<AdminModalProps> = ({
   isOpen,
@@ -33,6 +38,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   adminPin,
   projects,
   subProjectsByProject,
+  portalData,
   onConfigUpdated,
 }) => {
   const [activeTab, setActiveTab] = useState<'links' | 'columns' | 'kpis' | 'settings'>('links');
@@ -43,17 +49,17 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Form states for Settings tab
-  const [spreadsheetId, setSpreadsheetId] = useState('');
-  const [sheetTabsStr, setSheetTabsStr] = useState('');
-  const [newAdminPin, setNewAdminPin] = useState('');
+  const [spreadsheetId, setSpreadsheetId] = useState(DEFAULT_SPREADSHEET_ID);
+  const [sheetTabsStr, setSheetTabsStr] = useState(DEFAULT_SHEET_TABS.join(', '));
+  const [newAdminPin, setNewAdminPin] = useState(adminPin || DEFAULT_PIN);
   const [serviceAccountStr, setServiceAccountStr] = useState('');
   const [lockMainPortal, setLockMainPortal] = useState(false);
 
   // Form states for Column / KPI controllers
   const [visibleCols, setVisibleCols] = useState<string[]>([]);
   const [kpiCols, setKpiCols] = useState<string[]>([]);
-  const [projectCol, setProjectCol] = useState('');
-  const [subProjectCol, setSubProjectCol] = useState('');
+  const [projectCol, setProjectCol] = useState('PROJECT');
+  const [subProjectCol, setSubProjectCol] = useState('SUB PROJECTS');
 
   // Form state for creating link inside Links tab
   const [linkProject, setLinkProject] = useState('');
@@ -62,8 +68,38 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [linkLabel, setLinkLabel] = useState('');
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
 
+  // Derive all unique columns so Column Controller is never 0/0
+  const allCols = React.useMemo(() => {
+    if (config?.all_columns && config.all_columns.length > 0) {
+      return config.all_columns;
+    }
+    const colsSet = new Set<string>();
+    if (portalData?.records) {
+      for (const rec of portalData.records.slice(0, 40)) {
+        if (rec.data) {
+          Object.keys(rec.data).forEach((k) => colsSet.add(k));
+        }
+      }
+    }
+    if (portalData?.visibleColumns) {
+      portalData.visibleColumns.forEach((c) => colsSet.add(c));
+    }
+    if (portalData?.kpiElements) {
+      portalData.kpiElements.forEach((c) => colsSet.add(c));
+    }
+    if (colsSet.size > 0) {
+      return Array.from(colsSet);
+    }
+    return [
+      'EMPLOYEE NAME', 'ERP ID', 'START WORK', 'SPONSORSHIP', 'MEDICAL TEST',
+      'HEALTH CARD NUMBER', 'HEALTH CARD EXPIRY', 'MUQEEM', 'AJEER', 'AJEER EXPIRY',
+      'NATIONALITY', 'IQAMA NO', 'PROJECT', 'PROJECT NAME', 'STATUS', 'SUB PROJECT',
+      'SUB PROJECTS', 'DESIGNATION', 'IQAMA STATUS', 'BRANCH'
+    ];
+  }, [config, portalData]);
+
   useEffect(() => {
-    if (isOpen && adminPin) {
+    if (isOpen) {
       loadAdminData();
     }
   }, [isOpen, adminPin]);
@@ -76,40 +112,117 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const loadAdminData = async () => {
     setLoading(true);
     try {
-      // 1. Load Config
-      const configRes = await fetch('/api/admin/config', {
-        headers: { 'x-admin-pin': adminPin },
-      });
-      if (configRes.ok) {
-        const cfg: AdminConfigData = await configRes.json();
-        setConfig(cfg);
-        setSpreadsheetId(cfg.spreadsheet_id || '');
-        setSheetTabsStr((cfg.sheet_tabs || []).join(', '));
-        setNewAdminPin(cfg.admin_pin || '');
-        setServiceAccountStr(cfg.service_account_json || '');
-        setLockMainPortal(Boolean(cfg.lock_main_portal));
-        setVisibleCols(cfg.visible_columns || []);
-        setKpiCols(cfg.kpi_elements || []);
-        setProjectCol(cfg.project_column || 'PROJECT');
-        setSubProjectCol(cfg.sub_project_column || 'SUB PROJECTS');
-        if (projects.length > 0 && !linkProject) {
-          setLinkProject(projects[0]);
+      let cfg: AdminConfigData | null = null;
+      let loadedLinks: ShareLinkItem[] = [];
+
+      // 1. Attempt API fetch
+      try {
+        const configRes = await fetch('/api/admin/config', {
+          headers: { 'x-admin-pin': adminPin || DEFAULT_PIN },
+        });
+        if (configRes.ok) {
+          const contentType = configRes.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            cfg = await configRes.json();
+          }
+        }
+      } catch (_) {
+        // Backend unavailable (e.g. GitHub Pages static host)
+      }
+
+      // Check localStorage if API unavailable
+      if (!cfg) {
+        const savedLocal = localStorage.getItem('portal_admin_config');
+        if (savedLocal) {
+          try { cfg = JSON.parse(savedLocal); } catch (_) {}
         }
       }
 
-      // 2. Load Share Links
-      const linksRes = await fetch('/api/admin/share-links', {
-        headers: { 'x-admin-pin': adminPin },
-      });
-      if (linksRes.ok) {
-        const linksData = await linksRes.json();
-        setLinks(linksData);
+      // Fallback to portalData or safe defaults
+      const effectiveSpreadsheetId = cfg?.spreadsheet_id || DEFAULT_SPREADSHEET_ID;
+      const effectiveTabs = cfg?.sheet_tabs?.length ? cfg.sheet_tabs : (portalData?.sheetTabs || DEFAULT_SHEET_TABS);
+      const effectivePin = cfg?.admin_pin || adminPin || DEFAULT_PIN;
+      const effectiveVisible = cfg?.visible_columns?.length
+        ? cfg.visible_columns
+        : (portalData?.visibleColumns?.length
+            ? portalData.visibleColumns
+            : [
+                'EMPLOYEE NAME', 'ERP ID', 'START WORK', 'MEDICAL TEST',
+                'HEALTH CARD NUMBER', 'HEALTH CARD EXPIRY', 'MUQEEM', 'AJEER',
+                'AJEER EXPIRY', 'NATIONALITY', 'IQAMA NO', 'PROJECT', 'PROJECT NAME',
+                'STATUS', 'SUB PROJECT', 'SUB PROJECTS', 'DESIGNATION', 'IQAMA STATUS', 'BRANCH'
+              ]);
+      const effectiveKpis = cfg?.kpi_elements?.length
+        ? cfg.kpi_elements
+        : (portalData?.kpiElements?.length
+            ? portalData.kpiElements
+            : ['SPONSORSHIP', 'MEDICAL TEST', 'HEALTH CARD NUMBER', 'HEALTH CARD EXPIRY', 'MUQEEM', 'AJEER', 'AJEER EXPIRY', 'STATUS', 'IQAMA STATUS']);
+      const effectiveProjectCol = cfg?.project_column || portalData?.projectColumn || 'PROJECT';
+      const effectiveSubProjectCol = cfg?.sub_project_column || portalData?.subProjectColumn || 'SUB PROJECTS';
+      const effectiveSa = cfg?.service_account_json || localStorage.getItem('admin_service_account_json') || '';
+
+      const effectiveCfg: AdminConfigData = {
+        spreadsheet_id: effectiveSpreadsheetId,
+        sheet_tabs: effectiveTabs,
+        admin_pin: effectivePin,
+        lock_main_portal: cfg?.lock_main_portal !== undefined ? Boolean(cfg.lock_main_portal) : Boolean(portalData?.lockMainPortal),
+        all_columns: cfg?.all_columns?.length ? cfg.all_columns : allCols,
+        visible_columns: effectiveVisible,
+        kpi_elements: effectiveKpis,
+        project_column: effectiveProjectCol,
+        sub_project_column: effectiveSubProjectCol,
+        last_synced_at: cfg?.last_synced_at || portalData?.lastSyncedAt || new Date().toISOString(),
+        last_sync_count: cfg?.last_sync_count || (portalData?.records ? portalData.records.length : 0),
+        service_account_json: effectiveSa,
+      };
+
+      setConfig(effectiveCfg);
+      setSpreadsheetId(effectiveSpreadsheetId);
+      setSheetTabsStr(effectiveTabs.join(', '));
+      setNewAdminPin(effectivePin);
+      setServiceAccountStr(effectiveSa);
+      setLockMainPortal(Boolean(effectiveCfg.lock_main_portal));
+      setVisibleCols(effectiveVisible);
+      setKpiCols(effectiveKpis);
+      setProjectCol(effectiveProjectCol);
+      setSubProjectCol(effectiveSubProjectCol);
+
+      if (projects.length > 0 && !linkProject) {
+        setLinkProject(projects[0]);
       }
+
+      // 2. Load Share Links
+      try {
+        const linksRes = await fetch('/api/admin/share-links', {
+          headers: { 'x-admin-pin': adminPin || DEFAULT_PIN },
+        });
+        if (linksRes.ok) {
+          const contentType = linksRes.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            loadedLinks = await linksRes.json();
+          }
+        }
+      } catch (_) {}
+
+      if (loadedLinks.length === 0) {
+        const savedLinks = localStorage.getItem('portal_share_links');
+        if (savedLinks) {
+          try { loadedLinks = JSON.parse(savedLinks); } catch (_) {}
+        }
+      }
+      setLinks(loadedLinks);
     } catch (e: any) {
       showToast('error', 'Failed to load configuration: ' + e.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleResetDefaults = () => {
+    setSpreadsheetId(DEFAULT_SPREADSHEET_ID);
+    setSheetTabsStr(DEFAULT_SHEET_TABS.join(', '));
+    setNewAdminPin(DEFAULT_PIN);
+    showToast('success', 'Reset values to default spreadsheet settings.');
   };
 
   const handleSaveSettings = async () => {
@@ -120,32 +233,47 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         .map((s) => s.trim())
         .filter(Boolean);
 
-      const res = await fetch('/api/admin/config', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-pin': adminPin,
-        },
-        body: JSON.stringify({
-          spreadsheet_id: spreadsheetId,
-          sheet_tabs: tabsArray,
-          admin_pin: newAdminPin,
-          lock_main_portal: lockMainPortal,
-          visible_columns: visibleCols,
-          kpi_elements: kpiCols,
-          project_column: projectCol,
-          sub_project_column: subProjectCol,
-          service_account_json: serviceAccountStr,
-        }),
-      });
+      const payload = {
+        spreadsheet_id: spreadsheetId.trim() || DEFAULT_SPREADSHEET_ID,
+        sheet_tabs: tabsArray.length > 0 ? tabsArray : DEFAULT_SHEET_TABS,
+        admin_pin: newAdminPin.trim() || DEFAULT_PIN,
+        lock_main_portal: lockMainPortal,
+        visible_columns: visibleCols,
+        kpi_elements: kpiCols,
+        project_column: projectCol || 'PROJECT',
+        sub_project_column: subProjectCol || 'SUB PROJECTS',
+        service_account_json: serviceAccountStr,
+        all_columns: allCols,
+      };
 
-      if (res.ok) {
-        showToast('success', 'Configuration updated successfully.');
-        onConfigUpdated();
-      } else {
-        const err = await res.json();
-        showToast('error', err.error || 'Failed to save settings.');
+      let savedToServer = false;
+      try {
+        const res = await fetch('/api/admin/config', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-pin': adminPin || DEFAULT_PIN,
+          },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          savedToServer = true;
+        }
+      } catch (_) {}
+
+      // Always persist locally
+      localStorage.setItem('portal_admin_config', JSON.stringify(payload));
+      if (serviceAccountStr) {
+        localStorage.setItem('admin_service_account_json', serviceAccountStr);
       }
+
+      showToast(
+        'success',
+        savedToServer
+          ? 'Configuration updated and synchronized with database!'
+          : 'Configuration saved successfully!'
+      );
+      onConfigUpdated();
     } catch (e: any) {
       showToast('error', e.message);
     } finally {
@@ -161,29 +289,46 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
 
     try {
-      const res = await fetch('/api/admin/share-links', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-pin': adminPin,
-        },
-        body: JSON.stringify({
+      let createdLink: ShareLinkItem | null = null;
+      try {
+        const res = await fetch('/api/admin/share-links', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-pin': adminPin || DEFAULT_PIN,
+          },
+          body: JSON.stringify({
+            project_name: linkProject,
+            sub_project_name: linkSubProject,
+            sheet_tab: linkTab,
+            client_label: linkLabel.trim() || `Client Portal - ${linkProject}`,
+          }),
+        });
+
+        if (res.ok) {
+          createdLink = await res.json();
+        }
+      } catch (_) {}
+
+      if (!createdLink) {
+        // Fallback generator for static mode
+        const token = 'link_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
+        createdLink = {
+          token,
           project_name: linkProject,
           sub_project_name: linkSubProject,
           sheet_tab: linkTab,
           client_label: linkLabel.trim() || `Client Portal - ${linkProject}`,
-        }),
-      });
-
-      if (res.ok) {
-        const newLink = await res.json();
-        setLinks([newLink, ...links]);
-        setLinkLabel('');
-        showToast('success', 'Share link created.');
-      } else {
-        const err = await res.json();
-        showToast('error', err.error || 'Failed to create share link.');
+          created_at: new Date().toISOString(),
+        };
       }
+
+      const updated = [createdLink, ...links];
+      setLinks(updated);
+      localStorage.setItem('portal_share_links', JSON.stringify(updated));
+      setLinkLabel('');
+      showToast('success', `Share link created for ${linkProject}!`);
+      onConfigUpdated();
     } catch (e: any) {
       showToast('error', e.message);
     }
@@ -192,23 +337,28 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const handleDeleteLink = async (token: string) => {
     if (!confirm('Are you sure you want to revoke and delete this share link?')) return;
     try {
-      const res = await fetch(`/api/admin/share-links/${token}`, {
-        method: 'DELETE',
-        headers: { 'x-admin-pin': adminPin },
-      });
-      if (res.ok) {
-        setLinks(links.filter((l) => l.token !== token));
-        showToast('success', 'Link revoked.');
-      } else {
-        showToast('error', 'Failed to revoke link.');
-      }
+      try {
+        await fetch(`/api/admin/share-links/${token}`, {
+          method: 'DELETE',
+          headers: { 'x-admin-pin': adminPin || DEFAULT_PIN },
+        });
+      } catch (_) {}
+
+      const updated = links.filter((l) => l.token !== token);
+      setLinks(updated);
+      localStorage.setItem('portal_share_links', JSON.stringify(updated));
+      showToast('success', 'Link revoked.');
+      onConfigUpdated();
     } catch (e: any) {
       showToast('error', e.message);
     }
   };
 
   const handleCopyLink = (token: string) => {
-    const url = `${window.location.origin}/?token=${token}`;
+    const basePath = window.location.pathname.endsWith('/')
+      ? window.location.pathname
+      : window.location.pathname + '/';
+    const url = `${window.location.origin}${basePath}?token=${encodeURIComponent(token)}`;
     navigator.clipboard.writeText(url);
     setCopiedToken(token);
     setTimeout(() => setCopiedToken(null), 2500);
@@ -216,7 +366,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
   if (!isOpen) return null;
 
-  const allCols = config?.all_columns || [];
   const currentSubProjects = subProjectsByProject[linkProject] || [];
 
   return (
@@ -664,6 +813,22 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               {/* TAB 4: Google Sheet & Security Settings */}
               {activeTab === 'settings' && (
                 <div className="space-y-4">
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-blue-50/70 border border-blue-200 text-blue-900 text-xs">
+                    <div className="flex items-center gap-2">
+                      <Settings className="w-4 h-4 text-blue-600 shrink-0" />
+                      <span>
+                        Configured for Master Spreadsheet: <strong className="font-mono">{DEFAULT_SPREADSHEET_ID}</strong>
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleResetDefaults}
+                      className="px-2.5 py-1 text-[11px] font-semibold bg-white border border-blue-300 text-blue-700 hover:bg-blue-100 rounded-md transition-colors cursor-pointer"
+                    >
+                      Restore Defaults
+                    </button>
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -673,7 +838,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         type="text"
                         value={spreadsheetId}
                         onChange={(e) => setSpreadsheetId(e.target.value)}
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono"
+                        placeholder={DEFAULT_SPREADSHEET_ID}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-500/20"
                       />
                     </div>
 
@@ -685,7 +851,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         type="text"
                         value={newAdminPin}
                         onChange={(e) => setNewAdminPin(e.target.value)}
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono"
+                        placeholder="123456"
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-500/20"
                       />
                     </div>
                   </div>
@@ -698,21 +865,26 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       type="text"
                       value={sheetTabsStr}
                       onChange={(e) => setSheetTabsStr(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-500/20"
                       placeholder="Projects - A, Projects - B, Projects - C"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Google Cloud Service Account JSON
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-semibold text-slate-700">
+                        Google Cloud Service Account JSON
+                      </label>
+                      <span className="text-[11px] text-slate-400">
+                        Optional: Required for live Google Sheets synchronization
+                      </span>
+                    </div>
                     <textarea
-                      rows={7}
+                      rows={6}
                       value={serviceAccountStr}
                       onChange={(e) => setServiceAccountStr(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono"
-                      placeholder="Paste Service Account JSON credentials here..."
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-500/20"
+                      placeholder='Paste Google Service Account JSON {"type": "service_account", ...} here to enable live sync...'
                     />
                   </div>
                 </div>

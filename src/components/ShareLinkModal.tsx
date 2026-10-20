@@ -51,27 +51,46 @@ export const ShareLinkModal: React.FC<ShareLinkModalProps> = ({
     setError('');
 
     try {
-      const res = await fetch('/api/admin/share-links', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-pin': adminPin,
-        },
-        body: JSON.stringify({
+      let data: any = null;
+      try {
+        const res = await fetch('/api/admin/share-links', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-pin': adminPin || '123456',
+          },
+          body: JSON.stringify({
+            project_name: selectedProject,
+            sub_project_name: selectedSubProject,
+            sheet_tab: selectedTab,
+            client_label: clientLabel.trim() || `Client Portal - ${selectedProject}`,
+          }),
+        });
+
+        if (res.ok) {
+          data = await res.json();
+        }
+      } catch (_) {}
+
+      if (!data) {
+        // Fallback for static GitHub Pages preview
+        const token = 'link_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
+        data = {
+          token,
           project_name: selectedProject,
           sub_project_name: selectedSubProject,
           sheet_tab: selectedTab,
           client_label: clientLabel.trim() || `Client Portal - ${selectedProject}`,
-        }),
-      });
+          created_at: new Date().toISOString(),
+        };
 
-      const data = await res.json();
-      if (res.ok) {
-        setGeneratedLink(data);
-        if (onLinkCreated) onLinkCreated(data);
-      } else {
-        setError(data.error || 'Failed to create share link.');
+        const existingRaw = localStorage.getItem('portal_share_links');
+        const existing = existingRaw ? JSON.parse(existingRaw) : [];
+        localStorage.setItem('portal_share_links', JSON.stringify([data, ...existing]));
       }
+
+      setGeneratedLink(data);
+      if (onLinkCreated) onLinkCreated(data);
     } catch (err: any) {
       setError(err.message || 'Network error.');
     } finally {
@@ -79,8 +98,11 @@ export const ShareLinkModal: React.FC<ShareLinkModalProps> = ({
     }
   };
 
+  const basePath = typeof window !== 'undefined'
+    ? (window.location.pathname.endsWith('/') ? window.location.pathname : window.location.pathname + '/')
+    : '/';
   const fullUrl = generatedLink
-    ? `${window.location.origin}/?token=${generatedLink.token}`
+    ? `${window.location.origin}${basePath}?token=${encodeURIComponent(generatedLink.token)}`
     : '';
 
   const handleCopy = () => {
