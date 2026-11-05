@@ -14,9 +14,14 @@ import {
   CheckCircle2,
   AlertCircle,
   Plus,
-  Lock,
 } from 'lucide-react';
 import { AdminConfigData, ShareLinkItem, PortalDataResponse } from '../types';
+import {
+  isStaticHosting,
+  getBackendUrl,
+  setBackendUrl,
+  safeApiFetch,
+} from '../services/api';
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -54,6 +59,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [newAdminPin, setNewAdminPin] = useState(adminPin || DEFAULT_PIN);
   const [serviceAccountStr, setServiceAccountStr] = useState('');
   const [lockMainPortal, setLockMainPortal] = useState(false);
+  const [backendApiUrl, setBackendApiUrl] = useState(() => getBackendUrl());
+  const [confirmRevokeToken, setConfirmRevokeToken] = useState<string | null>(null);
 
   // Form states for Column / KPI controllers
   const [visibleCols, setVisibleCols] = useState<string[]>([]);
@@ -117,14 +124,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
       // 1. Attempt API fetch
       try {
-        const configRes = await fetch('/api/admin/config', {
+        setBackendApiUrl(getBackendUrl());
+        const configRes = await safeApiFetch<AdminConfigData>('/api/admin/config', {
           headers: { 'x-admin-pin': adminPin || DEFAULT_PIN },
         });
-        if (configRes.ok) {
-          const contentType = configRes.headers.get('content-type') || '';
-          if (contentType.includes('application/json')) {
-            cfg = await configRes.json();
-          }
+        if (configRes.ok && configRes.data) {
+          cfg = configRes.data;
         }
       } catch (_) {
         // Backend unavailable (e.g. GitHub Pages static host)
@@ -193,14 +198,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
       // 2. Load Share Links
       try {
-        const linksRes = await fetch('/api/admin/share-links', {
+        const linksRes = await safeApiFetch<ShareLinkItem[]>('/api/admin/share-links', {
           headers: { 'x-admin-pin': adminPin || DEFAULT_PIN },
         });
-        if (linksRes.ok) {
-          const contentType = linksRes.headers.get('content-type') || '';
-          if (contentType.includes('application/json')) {
-            loadedLinks = await linksRes.json();
-          }
+        if (linksRes.ok && linksRes.data && Array.isArray(linksRes.data)) {
+          loadedLinks = linksRes.data;
         }
       } catch (_) {}
 
@@ -248,7 +250,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
       let savedToServer = false;
       try {
-        const res = await fetch('/api/admin/config', {
+        setBackendUrl(backendApiUrl);
+        const res = await safeApiFetch('/api/admin/config', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -271,7 +274,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         'success',
         savedToServer
           ? 'Configuration updated and synchronized with database!'
-          : 'Configuration saved successfully!'
+          : 'Configuration saved locally!'
       );
       onConfigUpdated();
     } catch (e: any) {
@@ -291,7 +294,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     try {
       let createdLink: ShareLinkItem | null = null;
       try {
-        const res = await fetch('/api/admin/share-links', {
+        const res = await safeApiFetch<ShareLinkItem>('/api/admin/share-links', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -305,8 +308,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           }),
         });
 
-        if (res.ok) {
-          createdLink = await res.json();
+        if (res.ok && res.data) {
+          createdLink = res.data;
         }
       } catch (_) {}
 
@@ -335,10 +338,16 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   };
 
   const handleDeleteLink = async (token: string) => {
-    if (!confirm('Are you sure you want to revoke and delete this share link?')) return;
+    if (confirmRevokeToken !== token) {
+      setConfirmRevokeToken(token);
+      showToast('error', 'Click the delete icon again to confirm revoking this link.');
+      setTimeout(() => setConfirmRevokeToken(null), 4000);
+      return;
+    }
+    setConfirmRevokeToken(null);
     try {
       try {
-        await fetch(`/api/admin/share-links/${token}`, {
+        await safeApiFetch(`/api/admin/share-links/${token}`, {
           method: 'DELETE',
           headers: { 'x-admin-pin': adminPin || DEFAULT_PIN },
         });
@@ -873,6 +882,27 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <label className="block text-xs font-semibold text-slate-700">
+                        Live Backend API URL
+                      </label>
+                      <span className="text-[11px] text-slate-400">
+                        Optional: For GitHub Pages static deployment connecting to a remote server
+                      </span>
+                    </div>
+                    <input
+                      type="url"
+                      value={backendApiUrl}
+                      onChange={(e) => setBackendApiUrl(e.target.value)}
+                      placeholder="https://zawitco-legal.onrender.com"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-500/20"
+                    />
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      If your portal is hosted on GitHub Pages (<code className="text-slate-600 font-mono">zawitco.github.io</code>), enter your live backend URL here so API requests and sync connect to your live Node.js server.
+                    </p>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-semibold text-slate-700">
                         Google Cloud Service Account JSON
                       </label>
                       <span className="text-[11px] text-slate-400">
@@ -880,7 +910,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       </span>
                     </div>
                     <textarea
-                      rows={6}
+                      rows={5}
                       value={serviceAccountStr}
                       onChange={(e) => setServiceAccountStr(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-500/20"

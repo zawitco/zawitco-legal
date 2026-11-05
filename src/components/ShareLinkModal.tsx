@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Share2, Copy, Check, ExternalLink, ShieldCheck } from 'lucide-react';
 import { ShareLinkItem } from '../types';
+import { safeApiFetch } from '../services/api';
 
 interface ShareLinkModalProps {
   isOpen: boolean;
@@ -53,7 +54,7 @@ export const ShareLinkModal: React.FC<ShareLinkModalProps> = ({
     try {
       let data: any = null;
       try {
-        const res = await fetch('/api/admin/share-links', {
+        const res = await safeApiFetch<ShareLinkItem>('/api/admin/share-links', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -67,8 +68,8 @@ export const ShareLinkModal: React.FC<ShareLinkModalProps> = ({
           }),
         });
 
-        if (res.ok) {
-          data = await res.json();
+        if (res.ok && res.data) {
+          data = res.data;
         }
       } catch (_) {}
 

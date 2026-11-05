@@ -58,6 +58,31 @@ export interface KPIScorecardSummary {
   overallCompliancePct: number;
 }
 
+export type CorePillarKey = 'IQAMA' | 'AJEER' | 'HEALTH' | 'ALL';
+
+export interface CoreComplianceScorecard {
+  key: CorePillarKey;
+  title: string;
+  subtitle: string;
+  totalRecords: number;
+  validCount: number;
+  validPct: number;
+  warningCount: number;
+  warningPct: number;
+  expiredCount: number;
+  expiredPct: number;
+  missingCount: number;
+  missingPct: number;
+  compliancePct: number;
+}
+
+export interface EmployeeComplianceDetails {
+  iqama: { status: KPIStatus; text: string; number?: string; expiry?: string; daysRemaining?: number };
+  ajeer: { status: KPIStatus; text: string; expiry?: string; daysRemaining?: number };
+  health: { status: KPIStatus; text: string; expiry?: string; daysRemaining?: number };
+  overallStatus: KPIStatus;
+}
+
 export interface SubProjectBreakdownRow {
   projectName?: string;
   subProjectName: string;

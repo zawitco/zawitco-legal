@@ -2,13 +2,12 @@ import React from 'react';
 import {
   FileText,
   FileSpreadsheet,
-  RefreshCw,
-  Share2,
-  Lock,
-  Unlock,
-  ShieldCheck,
   Building2,
   Calendar,
+  ShieldCheck,
+  RefreshCw,
+  Unlock,
+  ChevronDown,
 } from 'lucide-react';
 import { LinkMeta } from '../types';
 
@@ -17,16 +16,15 @@ interface TopBarProps {
   linkMeta?: LinkMeta;
   activeProject: string;
   activeSubProject: string;
+  projects?: string[];
+  onSelectProject?: (proj: string) => void;
   lastSyncedAt: string | null;
-  isSyncing: boolean;
   isAdminLoggedIn: boolean;
-  onSync: () => void;
   onExportPdf: () => void;
   onExportExcel: () => void;
-  onOpenShareModal: () => void;
-  onOpenAdminModal: () => void;
-  onOpenPinModal: () => void;
-  onAdminLogout: () => void;
+  onOpenAdminModal?: () => void;
+  onOpenSyncModal?: () => void;
+  onAdminLogout?: () => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -34,15 +32,14 @@ export const TopBar: React.FC<TopBarProps> = ({
   linkMeta,
   activeProject,
   activeSubProject,
+  projects = [],
+  onSelectProject,
   lastSyncedAt,
-  isSyncing,
   isAdminLoggedIn,
-  onSync,
   onExportPdf,
   onExportExcel,
-  onOpenShareModal,
   onOpenAdminModal,
-  onOpenPinModal,
+  onOpenSyncModal,
   onAdminLogout,
 }) => {
   const syncTimeFormatted = lastSyncedAt
@@ -52,7 +49,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         hour: '2-digit',
         minute: '2-digit',
       })
-    : 'Not synced';
+    : 'Live';
 
   return (
     <header className="sticky top-0 z-30 bg-slate-900 border-b border-slate-800 text-white shadow-sm">
@@ -64,48 +61,55 @@ export const TopBar: React.FC<TopBarProps> = ({
           </div>
           <div className="flex flex-col">
             <span className="font-display font-bold text-base tracking-tight text-white whitespace-nowrap">
-              Zawitco Legal Portal
+              Zawitco Legal
             </span>
             <span className="text-[11px] text-slate-400 font-normal whitespace-nowrap">
-              Multi-Project Compliance &amp; KPI Engine
+              Client Compliance &amp; KPI Portal
             </span>
           </div>
         </div>
 
-        {/* Zone 2: Navigation & Contextual Info */}
-        <div className="hidden lg:flex items-center gap-3 text-xs text-slate-300">
+        {/* Zone 2: Project Selector & Context (Client Friendly) */}
+        <div className="flex items-center gap-3 text-xs">
           {mode === 'client_link' && linkMeta ? (
-            <div className="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700/60">
-              <span className="text-slate-400">Client:</span>
-              <span className="font-semibold text-white">{linkMeta.client_label}</span>
+            <div className="flex items-center gap-2 bg-slate-800/90 px-3 py-1.5 rounded-lg border border-slate-700/70">
+              <span className="text-slate-400">Client Scope:</span>
+              <span className="font-semibold text-emerald-400">{linkMeta.client_label}</span>
               <span className="text-slate-500">·</span>
-              <span className="text-slate-400">Project:</span>
-              <span className="font-semibold text-emerald-400">{linkMeta.project_name}</span>
-              {linkMeta.sub_project_name !== 'ALL' && (
-                <>
-                  <span className="text-slate-500">·</span>
-                  <span className="text-slate-400">Sub:</span>
-                  <span className="font-medium text-slate-200">{linkMeta.sub_project_name}</span>
-                </>
-              )}
+              <span className="text-slate-200 font-medium">{linkMeta.project_name}</span>
             </div>
           ) : (
-            <div className="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700/60">
-              <span className="text-slate-400">Active View:</span>
-              <span className="font-semibold text-white">
-                {activeProject === 'ALL' ? 'All Projects' : activeProject}
-              </span>
-              <span className="text-slate-500">·</span>
-              <span className="text-slate-400">Sub-Project:</span>
-              <span className="text-slate-200 font-medium">
-                {activeSubProject === 'ALL' ? 'All Sites' : activeSubProject}
-              </span>
+            <div className="flex items-center gap-2 bg-slate-800/90 px-2.5 py-1.5 rounded-lg border border-slate-700/70">
+              <span className="text-slate-400 text-[11px] hidden sm:inline">Project:</span>
+              {onSelectProject && projects.length > 0 ? (
+                <div className="relative flex items-center">
+                  <select
+                    value={activeProject}
+                    onChange={(e) => onSelectProject(e.target.value)}
+                    className="bg-transparent text-white font-semibold text-xs pr-6 pl-1 py-0.5 focus:outline-hidden cursor-pointer appearance-none"
+                  >
+                    <option value="ALL" className="bg-slate-900 text-white">
+                      All Projects ({projects.length})
+                    </option>
+                    {projects.map((p) => (
+                      <option key={p} value={p} className="bg-slate-900 text-white">
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-0 pointer-events-none" />
+                </div>
+              ) : (
+                <span className="font-semibold text-white">
+                  {activeProject === 'ALL' ? 'All Projects' : activeProject}
+                </span>
+              )}
             </div>
           )}
 
-          <div className="flex items-center gap-1.5 text-slate-400 bg-slate-800/40 px-2.5 py-1.5 rounded-md">
+          <div className="hidden md:flex items-center gap-1.5 text-slate-400 bg-slate-800/40 px-2.5 py-1.5 rounded-md text-[11px]">
             <Calendar className="w-3.5 h-3.5 text-slate-400" />
-            <span className="tabular-nums">Synced: {syncTimeFormatted}</span>
+            <span className="tabular-nums">Updated: {syncTimeFormatted}</span>
           </div>
         </div>
 
@@ -114,7 +118,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           {/* PDF Report Export */}
           <button
             onClick={onExportPdf}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 rounded-lg transition-colors whitespace-nowrap cursor-pointer shadow-xs"
             title="Download Executive PDF Compliance Report"
           >
             <FileText className="w-3.5 h-3.5 text-rose-400" />
@@ -124,67 +128,47 @@ export const TopBar: React.FC<TopBarProps> = ({
           {/* Excel Export */}
           <button
             onClick={onExportExcel}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 rounded-lg transition-colors whitespace-nowrap cursor-pointer shadow-xs"
             title="Export Multi-Sheet Excel Workbook"
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
             <span className="hidden sm:inline">Excel (.xlsx)</span>
           </button>
 
-          {/* Master View Exclusive Controls */}
-          {mode !== 'client_link' && (
-            <>
-              {/* Sync Now Button */}
-              <button
-                onClick={onSync}
-                disabled={isSyncing}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-50 active:scale-95 rounded-lg transition-colors whitespace-nowrap cursor-pointer shadow-sm"
-                title="Sync Google Sheets to SQLite"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-                <span>{isSyncing ? 'Syncing...' : 'Sync Now'}</span>
-              </button>
-
-              {/* Share Project Link Button */}
-              <button
-                onClick={onOpenShareModal}
-                className="hidden sm:flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-                title="Generate Secure Shareable Link for Client"
-              >
-                <Share2 className="w-3.5 h-3.5 text-blue-400" />
-                <span>Share Link</span>
-              </button>
-
-              {/* Admin Control Center or PIN Unlock */}
-              {isAdminLoggedIn ? (
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={onOpenAdminModal}
-                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors whitespace-nowrap cursor-pointer shadow-sm"
-                    title="Open Admin Control Center"
-                  >
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    <span className="hidden md:inline">Control Center</span>
-                  </button>
-                  <button
-                    onClick={onAdminLogout}
-                    className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                    title="Exit Admin Session"
-                  >
-                    <Unlock className="w-4 h-4 text-emerald-400" />
-                  </button>
-                </div>
-              ) : (
+          {/* Admin Mode Controls (ONLY VISIBLE WHEN ADMIN LOGGED IN) */}
+          {isAdminLoggedIn && (
+            <div className="flex items-center gap-1.5 pl-2 border-l border-slate-700">
+              {onOpenAdminModal && (
                 <button
-                  onClick={onOpenPinModal}
-                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-800 border border-slate-700 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-                  title="Enter Admin PIN to unlock full administrative controls"
+                  onClick={onOpenAdminModal}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors cursor-pointer"
+                  title="Admin Control Center"
                 >
-                  <Lock className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="hidden md:inline">Admin Mode</span>
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span className="hidden md:inline">Admin Center</span>
                 </button>
               )}
-            </>
+
+              {onOpenSyncModal && (
+                <button
+                  onClick={onOpenSyncModal}
+                  className="p-1.5 text-emerald-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                  title="Sync Data"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </button>
+              )}
+
+              {onAdminLogout && (
+                <button
+                  onClick={onAdminLogout}
+                  className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                  title="Lock Admin Session"
+                >
+                  <Unlock className="w-4 h-4 text-emerald-400" />
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>

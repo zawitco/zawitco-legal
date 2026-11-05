@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && node -e \"require('fs').cpSync('dist', 'docs', {recursive: true})\"",
+    "sync:export": "tsx scripts/sync.ts",
     "start": "tsx server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",

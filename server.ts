@@ -13,6 +13,18 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
+// Enable CORS for external access (e.g. GitHub Pages frontend connecting to live backend)
+app.use((req: Request, res: Response, next: NextFunction) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, x-admin-pin');
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
+
 // Middleware to verify admin PIN for protected routes
 async function requireAdminPin(req: Request, res: Response, next: NextFunction) {
   const pinHeader = req.headers['x-admin-pin'];

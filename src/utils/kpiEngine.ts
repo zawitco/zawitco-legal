@@ -95,8 +95,11 @@ export function classifyKPIValue(rawVal: any): {
   // Text status matching
   const upper = s.toUpperCase();
 
-  // 1. Valid / Active
+  // 1. Explicit Exemptions / Approved
   if (
+    upper.includes('NO NEED') ||
+    upper.includes('NOT NEEDED') ||
+    upper.includes('EXEMPT') ||
     upper === 'VALID' ||
     upper === 'ACTIVE' ||
     upper === 'YES' ||
@@ -106,13 +109,30 @@ export function classifyKPIValue(rawVal: any): {
     upper === 'APPROVED' ||
     upper === 'OK' ||
     upper === 'UNDER SPONSOR' ||
-    upper.includes('NO NEED') ||
     upper === 'PASSED'
   ) {
     return { status: 'VALID', formattedText: s };
   }
 
-  // 2. Expiring Soon / Pending
+  // 2. Negative / Non-Compliant / Not Issued (e.g. "NO AJEER YET", "NO AJEER", "NOT ISSUED")
+  if (
+    upper === 'NO' ||
+    upper.startsWith('NO ') ||
+    upper.startsWith('NOT ') ||
+    upper === 'EXPIRED' ||
+    upper === 'INACTIVE' ||
+    upper === 'REJECTED' ||
+    upper === 'FAILED' ||
+    upper === 'CANCELLED' ||
+    upper === 'RUNAWAY' ||
+    upper === 'TERMINATED' ||
+    upper === 'ESCAPE' ||
+    upper === 'WITHOUT'
+  ) {
+    return { status: 'EXPIRED', formattedText: s };
+  }
+
+  // 3. Expiring Soon / Pending
   if (
     upper === 'PENDING' ||
     upper === 'IN PROGRESS' ||
@@ -126,28 +146,165 @@ export function classifyKPIValue(rawVal: any): {
     return { status: 'WARNING', formattedText: s };
   }
 
-  // 3. Expired / Non-Compliant
-  if (
-    upper === 'EXPIRED' ||
-    upper === 'NO' ||
-    upper === 'INACTIVE' ||
-    upper === 'REJECTED' ||
-    upper === 'FAILED' ||
-    upper === 'CANCELLED' ||
-    upper === 'RUNAWAY' ||
-    upper === 'TERMINATED' ||
-    upper === 'ESCAPE'
-  ) {
-    return { status: 'EXPIRED', formattedText: s };
-  }
-
-  // If number or ID code (e.g. Health card number or license number), treat as Valid/Issued
+  // If number or ID code (e.g. Iqama 10-digit or Health card code), treat as Valid/Issued
   if (/^\d{4,}$/.test(s)) {
     return { status: 'VALID', formattedText: s };
   }
 
   // Default to Valid if has text content, else Missing
   return { status: 'VALID', formattedText: s };
+}
+
+export function getEmployeeComplianceDetails(data: Record<string, string>): {
+  iqama: { status: KPIStatus; text: string; number?: string; expiry?: string; daysRemaining?: number };
+  ajeer: { status: KPIStatus; text: string; expiry?: string; daysRemaining?: number };
+  health: { status: KPIStatus; text: string; expiry?: string; daysRemaining?: number };
+  overallStatus: KPIStatus;
+} {
+  // 1. Iqama Status
+  const iqamaStatusRaw = data['IQAMA STATUS'];
+  const iqamaNo = (data['IQAMA NO'] || '').trim();
+  let iqama: { status: KPIStatus; text: string; number?: string; expiry?: string; daysRemaining?: number };
+
+  if (iqamaStatusRaw) {
+    const classified = classifyKPIValue(iqamaStatusRaw);
+    iqama = {
+      status: classified.status,
+      text: classified.formattedText,
+      number: iqamaNo || undefined,
+      daysRemaining: classified.daysRemaining,
+    };
+  } else if (iqamaNo && /^\d{5,}$/.test(iqamaNo)) {
+    iqama = { status: 'VALID', text: 'Valid (' + iqamaNo + ')', number: iqamaNo };
+  } else if (iqamaNo) {
+    const classified = classifyKPIValue(iqamaNo);
+    iqama = { status: classified.status, text: classified.formattedText, number: iqamaNo };
+  } else {
+    iqama = { status: 'MISSING', text: 'Missing Iqama' };
+  }
+
+  // 2. Ajeer Status
+  const ajeerExp = (data['AJEER EXPIRY'] || '').trim();
+  const ajeerRaw = (data['AJEER'] || '').trim();
+  let ajeer: { status: KPIStatus; text: string; expiry?: string; daysRemaining?: number };
+
+  if (ajeerExp && ajeerExp !== '-' && ajeerExp.toUpperCase() !== 'NO NEED' && ajeerExp.toUpperCase() !== 'N/A') {
+    const classified = classifyKPIValue(ajeerExp);
+    ajeer = {
+      status: classified.status,
+      text: classified.formattedText,
+      expiry: ajeerExp,
+      daysRemaining: classified.daysRemaining,
+    };
+  } else if (ajeerRaw) {
+    const classified = classifyKPIValue(ajeerRaw);
+    ajeer = { status: classified.status, text: classified.formattedText };
+  } else {
+    ajeer = { status: 'MISSING', text: 'No Ajeer Record' };
+  }
+
+  // 3. Health Card & Medical Status
+  const hcExp = (data['HEALTH CARD EXPIRY'] || '').trim();
+  const hcNum = (data['HEALTH CARD NUMBER'] || '').trim();
+  const med = (data['MEDICAL TEST'] || '').trim();
+  let health: { status: KPIStatus; text: string; expiry?: string; daysRemaining?: number };
+
+  if (hcExp && hcExp !== '-' && hcExp.toUpperCase() !== 'NO NEED' && hcExp.toUpperCase() !== 'N/A') {
+    const classified = classifyKPIValue(hcExp);
+    health = {
+      status: classified.status,
+      text: classified.formattedText,
+      expiry: hcExp,
+      daysRemaining: classified.daysRemaining,
+    };
+  } else if (hcNum && /^\d{4,}$/.test(hcNum)) {
+    health = { status: 'VALID', text: 'Card #' + hcNum };
+  } else if (med) {
+    const classified = classifyKPIValue(med);
+    health = { status: classified.status, text: classified.formattedText };
+  } else {
+    health = { status: 'MISSING', text: 'No Health Record' };
+  }
+
+  // Compute Overall Status
+  let overallStatus: KPIStatus = 'VALID';
+  if (iqama.status === 'EXPIRED' || ajeer.status === 'EXPIRED' || health.status === 'EXPIRED') {
+    overallStatus = 'EXPIRED';
+  } else if (iqama.status === 'WARNING' || ajeer.status === 'WARNING' || health.status === 'WARNING') {
+    overallStatus = 'WARNING';
+  } else if (iqama.status === 'MISSING' && ajeer.status === 'MISSING' && health.status === 'MISSING') {
+    overallStatus = 'MISSING';
+  }
+
+  return { iqama, ajeer, health, overallStatus };
+}
+
+export function calculateCoreThreeScorecards(records: RecordItemData[]): {
+  iqama: {
+    title: string;
+    total: number;
+    valid: number;
+    warning: number;
+    expired: number;
+    missing: number;
+    compliancePct: number;
+  };
+  ajeer: {
+    title: string;
+    total: number;
+    valid: number;
+    warning: number;
+    expired: number;
+    missing: number;
+    compliancePct: number;
+  };
+  health: {
+    title: string;
+    total: number;
+    valid: number;
+    warning: number;
+    expired: number;
+    missing: number;
+    compliancePct: number;
+  };
+} {
+  const total = records.length;
+  const res = {
+    iqama: { title: 'Iqama Compliance', total, valid: 0, warning: 0, expired: 0, missing: 0, compliancePct: 0 },
+    ajeer: { title: 'Ajeer Permit', total, valid: 0, warning: 0, expired: 0, missing: 0, compliancePct: 0 },
+    health: { title: 'Health Card & Medical', total, valid: 0, warning: 0, expired: 0, missing: 0, compliancePct: 0 },
+  };
+
+  if (total === 0) return res;
+
+  for (const rec of records) {
+    const c = getEmployeeComplianceDetails(rec.data);
+    if (c.iqama.status === 'VALID') res.iqama.valid++;
+    else if (c.iqama.status === 'WARNING') res.iqama.warning++;
+    else if (c.iqama.status === 'EXPIRED') res.iqama.expired++;
+    else res.iqama.missing++;
+
+    if (c.ajeer.status === 'VALID') res.ajeer.valid++;
+    else if (c.ajeer.status === 'WARNING') res.ajeer.warning++;
+    else if (c.ajeer.status === 'EXPIRED') res.ajeer.expired++;
+    else res.ajeer.missing++;
+
+    if (c.health.status === 'VALID') res.health.valid++;
+    else if (c.health.status === 'WARNING') res.health.warning++;
+    else if (c.health.status === 'EXPIRED') res.health.expired++;
+    else res.health.missing++;
+  }
+
+  const calcPct = (v: number, m: number) => {
+    const nonMissing = total - m;
+    return nonMissing > 0 ? Math.round((v / nonMissing) * 100) : total > 0 ? Math.round((v / total) * 100) : 0;
+  };
+
+  res.iqama.compliancePct = calcPct(res.iqama.valid, res.iqama.missing);
+  res.ajeer.compliancePct = calcPct(res.ajeer.valid, res.ajeer.missing);
+  res.health.compliancePct = calcPct(res.health.valid, res.health.missing);
+
+  return res;
 }
 
 export function calculateScorecardForElement(

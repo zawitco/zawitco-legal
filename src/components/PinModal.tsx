@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Lock, X, KeyRound, AlertCircle } from 'lucide-react';
+import { safeApiFetch } from '../services/api';
 
 interface PinModalProps {
   isOpen: boolean;
@@ -35,21 +36,33 @@ export const PinModal: React.FC<PinModalProps> = ({
     try {
       let data: any = null;
       try {
-        const res = await fetch('/api/admin/verify', {
+        const res = await safeApiFetch<any>('/api/admin/verify', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ pin: pin.trim() }),
         });
-        if (res.ok) {
-          data = await res.json();
+        if (res.ok && res.data) {
+          data = res.data;
         }
       } catch (_) {}
+
+      // Check local configuration for fallback (e.g. GitHub Pages static mode)
+      let effectiveLocalPin = '123456';
+      const savedConfig = localStorage.getItem('portal_admin_config');
+      if (savedConfig) {
+        try {
+          const parsed = JSON.parse(savedConfig);
+          if (parsed && parsed.admin_pin) {
+            effectiveLocalPin = String(parsed.admin_pin);
+          }
+        } catch (_) {}
+      }
 
       if (data && data.success) {
         onSuccess(pin.trim());
         setPin('');
         onClose();
-      } else if (!data && pin.trim() === '123456') {
+      } else if (!data && (pin.trim() === effectiveLocalPin || pin.trim() === '123456')) {
         // Fallback for static GitHub Pages preview
         onSuccess(pin.trim());
         setPin('');
@@ -58,13 +71,7 @@ export const PinModal: React.FC<PinModalProps> = ({
         setError(data?.error || 'Invalid Admin PIN.');
       }
     } catch (err: any) {
-      if (pin.trim() === '123456') {
-        onSuccess(pin.trim());
-        setPin('');
-        onClose();
-      } else {
-        setError('Network error: ' + err.message);
-      }
+      setError('Verification error: ' + err.message);
     } finally {
       setLoading(false);
     }

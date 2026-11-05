@@ -631,6 +631,86 @@ export async function syncGoogleSheetsData(): Promise<{
 
   persistDb(db);
 
+  // Auto-export snapshot to static public and docs directories for GitHub Pages
+  try {
+    const isEmployeeActive = (obj: Record<string, string>) => {
+      const statusKey = Object.keys(obj).find((k) => k.trim().toUpperCase() === 'STATUS');
+      if (!statusKey) return true;
+      const val = (obj[statusKey] || '').trim().toUpperCase();
+      return val === 'ACTIVE';
+    };
+
+    const allowedCols = new Set([
+      ...visibleCols,
+      'STATUS',
+      'PROJECT NAME',
+      'PROJECT',
+      'SUB PROJECT',
+      'SUB PROJECTS',
+      'BRANCH',
+      'DESIGNATION',
+      ...kpiElements,
+    ]);
+
+    const sanitizedRecords = parsedRecords
+      .map((r) => {
+        let rowObj: Record<string, string> = {};
+        try {
+          rowObj = JSON.parse(r.data_json);
+        } catch {
+          rowObj = {};
+        }
+
+        if (!isEmployeeActive(rowObj)) {
+          return null;
+        }
+
+        const filteredObj: Record<string, string> = {};
+        for (const key of Object.keys(rowObj)) {
+          if (allowedCols.has(key)) {
+            filteredObj[key] = rowObj[key];
+          }
+        }
+        if (!filteredObj['STATUS']) {
+          filteredObj['STATUS'] = 'ACTIVE';
+        }
+
+        return {
+          composite_id: r.composite_id,
+          sheet_tab: r.sheet_tab,
+          project_name: r.project_name,
+          sub_project_name: r.sub_project_name,
+          data: filteredObj,
+          updated_at: timestamp,
+        };
+      })
+      .filter(Boolean);
+
+    const snapshotPayload = {
+      mode: 'public',
+      records: sanitizedRecords,
+      visibleColumns: visibleCols,
+      kpiElements,
+      projectColumn: 'PROJECT',
+      subProjectColumn: 'SUB PROJECTS',
+      lastSyncedAt: timestamp,
+      sheetTabs,
+      lockMainPortal: false,
+    };
+
+    const serialized = JSON.stringify(snapshotPayload, null, 2);
+    const pubPath = path.resolve(process.cwd(), 'public/portal-data.json');
+    const docsPath = path.resolve(process.cwd(), 'docs/portal-data.json');
+    if (fs.existsSync(path.dirname(pubPath))) {
+      fs.writeFileSync(pubPath, serialized, 'utf8');
+    }
+    if (fs.existsSync(path.dirname(docsPath))) {
+      fs.writeFileSync(docsPath, serialized, 'utf8');
+    }
+  } catch (exportErr) {
+    console.warn('Could not auto-write static portal-data.json files:', exportErr);
+  }
+
   return {
     success: true,
     count: parsedRecords.length,

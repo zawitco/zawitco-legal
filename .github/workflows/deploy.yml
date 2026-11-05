@@ -33,6 +33,17 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Sync Google Sheets (if secret provided)
+        run: |
+          if [ -n "$GOOGLE_SERVICE_ACCOUNT_JSON" ]; then
+            echo "Syncing Google Sheets..."
+            npm run sync:export
+          else
+            echo "No GOOGLE_SERVICE_ACCOUNT_JSON provided, using existing portal-data.json snapshot."
+          fi
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+
       - name: Build Vite application
         run: npm run build
 

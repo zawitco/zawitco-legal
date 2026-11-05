@@ -3,31 +3,29 @@ import {
   PortalDataResponse,
   KPIStatus,
   RecordItemData,
-  ShareLinkItem,
+  CorePillarKey,
 } from './types';
 import {
   calculateScorecardForElement,
   calculateSubProjectBreakdown,
   calculateHierarchicalBreakdown,
+  calculateCoreThreeScorecards,
 } from './utils/kpiEngine';
 import { exportPdfReport, exportExcelReport } from './utils/reportExport';
 import { TopBar } from './components/TopBar';
-import { KPICardStrip } from './components/KPICardStrip';
-import { KPISelectorBar } from './components/KPISelectorBar';
-import { SubProjectMatrix } from './components/SubProjectMatrix';
-import { DataTable } from './components/DataTable';
+import { ClientKpiStrip } from './components/ClientKpiStrip';
+import { SubProjectOverviewGrid } from './components/SubProjectOverviewGrid';
+import { EmployeeComplianceRoster } from './components/EmployeeComplianceRoster';
 import { PinModal } from './components/PinModal';
 import { ShareLinkModal } from './components/ShareLinkModal';
 import { AdminModal } from './components/AdminModal';
+import { SyncModal } from './components/SyncModal';
+import { isStaticHosting, getBackendUrl, safeApiFetch } from './services/api';
 import {
-  Layers,
   ShieldAlert,
   Lock,
-  Building,
   RefreshCw,
   Users,
-  ChevronDown,
-  ChevronUp,
 } from 'lucide-react';
 
 export default function App() {
@@ -40,13 +38,12 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Filters
+  // Client Core Filters
   const [activeTab, setActiveTab] = useState<string>('ALL');
   const [activeProject, setActiveProject] = useState<string>('ALL');
   const [activeSubProject, setActiveSubProject] = useState<string>('ALL');
-  const [activeKpi, setActiveKpi] = useState<string>('AJEER');
+  const [activePillar, setActivePillar] = useState<CorePillarKey>('ALL');
   const [selectedStatus, setSelectedStatus] = useState<KPIStatus | 'ALL'>('ALL');
-  const [isEmployeeRosterOpen, setIsEmployeeRosterOpen] = useState(false);
 
   // Modals
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
@@ -55,6 +52,32 @@ export default function App() {
   >('portal_unlock');
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+
+  const showToast = useCallback((type: 'success' | 'error' | 'info', text: string) => {
+    setToastMessage({ type, text });
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 4500);
+  }, []);
+
+  // Keyboard shortcut for discrete Admin Access (Ctrl+Shift+A or Cmd+Shift+A)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        if (!adminPin) {
+          setPinPurpose('admin_center');
+          setIsPinModalOpen(true);
+        } else {
+          setIsAdminModalOpen(true);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [adminPin]);
 
   // Read URL query parameter for token on boot
   useEffect(() => {
@@ -87,26 +110,33 @@ export default function App() {
     try {
       let data: any = null;
 
+      // 0. Check custom imported data in localStorage first (if static mode)
+      const customDataStr = localStorage.getItem('portal_custom_data');
+      if (customDataStr && (!getBackendUrl() && isStaticHosting())) {
+        try {
+          const parsedCustom = JSON.parse(customDataStr);
+          if (parsedCustom && Array.isArray(parsedCustom.records) && parsedCustom.records.length > 0) {
+            data = parsedCustom;
+          }
+        } catch (_) {}
+      }
+
       // 1. Try server API endpoint
-      try {
-        const res = await fetch(url, { headers });
-        if (res.status === 401) {
-          const pinData = await res.json().catch(() => ({}));
-          if (pinData.requiresPin) {
+      if (!data) {
+        try {
+          const res = await safeApiFetch<any>(url, { headers });
+          if (res.status === 401 && res.data?.requiresPin) {
             setIsPinModalOpen(true);
             setPinPurpose('portal_unlock');
             setLoading(false);
             return;
           }
-        }
-        if (res.ok) {
-          const contentType = res.headers.get('content-type') || '';
-          if (contentType.includes('application/json')) {
-            data = await res.json();
+          if (res.ok && res.data?.records) {
+            data = res.data;
           }
+        } catch (_) {
+          // Backend API not reachable
         }
-      } catch (_) {
-        // Backend API not reachable (e.g. GitHub Pages static hosting)
       }
 
       // 2. Fallback to static portal-data.json snapshot for GitHub Pages
@@ -122,10 +152,13 @@ export default function App() {
           try {
             const staticRes = await fetch(candidate);
             if (staticRes.ok) {
-              const parsed = await staticRes.json();
-              if (parsed && Array.isArray(parsed.records)) {
-                data = parsed;
-                break;
+              const contentType = staticRes.headers.get('content-type') || '';
+              if (contentType.includes('application/json')) {
+                const parsed = await staticRes.json();
+                if (parsed && Array.isArray(parsed.records)) {
+                  data = parsed;
+                  break;
+                }
               }
             }
           } catch (_) {}
@@ -139,7 +172,6 @@ export default function App() {
       // If client token provided in static mode, filter client-side
       if (currentToken && data.records) {
         const decodedToken = decodeURIComponent(currentToken).toLowerCase();
-        // Check if token matches a project name or client label
         const matched = data.records.filter((r: any) => {
           const p = (r.project_name || '').toLowerCase();
           const sp = (r.sub_project_name || '').toLowerCase();
@@ -152,14 +184,6 @@ export default function App() {
       }
 
       setPortalData(data);
-
-      // Initialize default active KPI if available
-      if (data.kpiElements && data.kpiElements.length > 0) {
-        const preferred = data.kpiElements.find(
-          (k: string) => /ajeer/i.test(k) || /health/i.test(k)
-        );
-        setActiveKpi(preferred || data.kpiElements[0]);
-      }
 
       // If client share link, lock project
       if (data.mode === 'client_link' && data.linkMeta) {
@@ -179,8 +203,13 @@ export default function App() {
     loadPortalData();
   }, [loadPortalData]);
 
-  // Handle Sync
+  // Handle Sync (Internal / Admin)
   const handleSyncNow = async () => {
+    if (isStaticHosting() && !getBackendUrl()) {
+      setIsSyncModalOpen(true);
+      return;
+    }
+
     if (!adminPin) {
       setPinPurpose('sync');
       setIsPinModalOpen(true);
@@ -189,18 +218,22 @@ export default function App() {
 
     setIsSyncing(true);
     try {
-      const res = await fetch('/api/sync', {
-        method: 'POST',
-        headers: { 'x-admin-pin': adminPin },
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      const res = await safeApiFetch<{ success: boolean; count?: number; error?: string }>(
+        '/api/sync',
+        {
+          method: 'POST',
+          headers: { 'x-admin-pin': adminPin },
+        }
+      );
+
+      if (res.ok && res.data?.success) {
+        showToast('success', `Sync completed! Updated ${res.data.count || 0} active records.`);
         await loadPortalData();
       } else {
-        alert(data.error || 'Sync failed.');
+        showToast('error', res.error || 'Sync failed.');
       }
     } catch (err: any) {
-      alert('Sync network error: ' + err.message);
+      showToast('error', 'Sync network error: ' + err.message);
     } finally {
       setIsSyncing(false);
     }
@@ -228,27 +261,26 @@ export default function App() {
   const handleAdminLogout = () => {
     setAdminPin('');
     sessionStorage.removeItem('admin_pin');
+    showToast('info', 'Admin session ended.');
     loadPortalData('');
   };
 
   // Derive unique project and sub-project lists
-  const { allProjects, subProjectsByProject, sheetTabs } = useMemo(() => {
+  const { allProjects, subProjectsByProject } = useMemo(() => {
     if (!portalData || !portalData.records) {
-      return { allProjects: [], subProjectsByProject: {}, sheetTabs: [] };
+      return { allProjects: [], subProjectsByProject: {} };
     }
 
     const projectsSet = new Set<string>();
     const subProjMap: Record<string, Set<string>> = {};
-    const tabsSet = new Set<string>();
 
     for (const rec of portalData.records) {
-      if (rec.sheet_tab) tabsSet.add(rec.sheet_tab);
-      const proj = (rec.data['PROJECT NAME'] || rec.data['PROJECT'] || rec.project_name || 'Unassigned').trim();
+      const proj = (rec.data['PROJECT NAME'] || rec.data['PROJECT'] || rec.project_name || 'General').trim();
       projectsSet.add(proj);
 
       if (!subProjMap[proj]) subProjMap[proj] = new Set();
       const subProj = (rec.data['SUB PROJECT'] || rec.data['SUB PROJECTS'] || rec.sub_project_name || '').trim();
-      if (subProj && subProj !== 'MAIN') {
+      if (subProj && subProj !== 'MAIN' && !subProj.includes('@')) {
         subProjMap[proj].add(subProj);
       }
     }
@@ -261,34 +293,22 @@ export default function App() {
     return {
       allProjects: Array.from(projectsSet).sort(),
       subProjectsByProject: subProjectArrays,
-      sheetTabs: portalData.sheetTabs || Array.from(tabsSet),
     };
   }, [portalData]);
 
-  // Filter records by Master Tab, Project, and Sub-Project
-  const hierarchyFilteredRecords = useMemo(() => {
+  // Filter records by Project Scope (Sub-project filtering is handled in components)
+  const projectFilteredRecords = useMemo(() => {
     if (!portalData || !portalData.records) return [];
 
     return portalData.records.filter((rec) => {
-      // 1. Tab filter (Master mode)
-      if (portalData.mode !== 'client_link' && activeTab !== 'ALL') {
-        if (rec.sheet_tab !== activeTab) return false;
-      }
-
       const recProj = (rec.data['PROJECT NAME'] || rec.data['PROJECT'] || rec.project_name || '').trim();
-      const recSub = (rec.data['SUB PROJECT'] || rec.data['SUB PROJECTS'] || rec.sub_project_name || '').trim();
 
-      // 2. Project filter
+      // Project filter
       if (activeProject !== 'ALL') {
         if (recProj !== activeProject) return false;
       }
 
-      // 3. Sub-Project filter
-      if (activeSubProject !== 'ALL') {
-        if (recSub !== activeSubProject) return false;
-      }
-
-      // 4. Strict status filter: only show Employees whose STATUS field is active
+      // Strict status filter: active employees only
       const statusKey = Object.keys(rec.data).find((k) => k.trim().toUpperCase() === 'STATUS');
       if (statusKey) {
         const val = (rec.data[statusKey] || '').trim().toUpperCase();
@@ -297,37 +317,34 @@ export default function App() {
 
       return true;
     });
-  }, [portalData, activeTab, activeProject, activeSubProject]);
+  }, [portalData, activeProject]);
 
-  // Compute KPI Scorecard and Sub-Project matrix
-  const scorecard = useMemo(() => {
-    return calculateScorecardForElement(hierarchyFilteredRecords, activeKpi);
-  }, [hierarchyFilteredRecords, activeKpi]);
+  // Compute 3 Core Scorecards (Iqama, Ajeer, Health Card)
+  const coreScorecards = useMemo(() => {
+    return calculateCoreThreeScorecards(projectFilteredRecords);
+  }, [projectFilteredRecords]);
 
-  const subProjectBreakdown = useMemo(() => {
-    return calculateSubProjectBreakdown(hierarchyFilteredRecords, activeKpi);
-  }, [hierarchyFilteredRecords, activeKpi]);
+  // Compute standard scorecard for PDF/Excel exports
+  const activeKpiName =
+    activePillar === 'IQAMA'
+      ? 'IQAMA STATUS'
+      : activePillar === 'AJEER'
+      ? 'AJEER EXPIRY'
+      : activePillar === 'HEALTH'
+      ? 'HEALTH CARD EXPIRY'
+      : 'COMPLIANCE';
 
-  // Compute Hierarchical Breakdown across projects & sub-projects
-  const hierarchicalBreakdown = useMemo(() => {
-    if (!portalData || !portalData.records) return [];
+  const exportScorecard = useMemo(() => {
+    return calculateScorecardForElement(projectFilteredRecords, activeKpiName);
+  }, [projectFilteredRecords, activeKpiName]);
 
-    // Filter by Tab (if not in client share link mode)
-    const tabFiltered = portalData.records.filter((rec) => {
-      if (portalData.mode !== 'client_link' && activeTab !== 'ALL') {
-        if (rec.sheet_tab !== activeTab) return false;
-      }
-      // Strict status filter: active only
-      const statusKey = Object.keys(rec.data).find((k) => k.trim().toUpperCase() === 'STATUS');
-      if (statusKey) {
-        const val = (rec.data[statusKey] || '').trim().toUpperCase();
-        if (val && val !== 'ACTIVE') return false;
-      }
-      return true;
-    });
+  const exportSubProjectBreakdown = useMemo(() => {
+    return calculateSubProjectBreakdown(projectFilteredRecords, activeKpiName);
+  }, [projectFilteredRecords, activeKpiName]);
 
-    return calculateHierarchicalBreakdown(tabFiltered, activeKpi);
-  }, [portalData, activeTab, activeKpi]);
+  const exportHierarchicalBreakdown = useMemo(() => {
+    return calculateHierarchicalBreakdown(projectFilteredRecords, activeKpiName);
+  }, [projectFilteredRecords, activeKpiName]);
 
   // Export handlers
   const handleExportPdf = () => {
@@ -335,12 +352,12 @@ export default function App() {
     exportPdfReport({
       projectName: activeProject === 'ALL' ? 'All_Projects' : activeProject,
       subProjectName: activeSubProject,
-      activeKpi,
-      records: hierarchyFilteredRecords,
+      activeKpi: activeKpiName,
+      records: projectFilteredRecords,
       visibleColumns: portalData.visibleColumns || [],
-      scorecard,
-      subProjectBreakdown,
-      hierarchy: hierarchicalBreakdown,
+      scorecard: exportScorecard,
+      subProjectBreakdown: exportSubProjectBreakdown,
+      hierarchy: exportHierarchicalBreakdown,
       lastSyncedAt: portalData.lastSyncedAt,
     });
   };
@@ -350,12 +367,12 @@ export default function App() {
     exportExcelReport({
       projectName: activeProject === 'ALL' ? 'All_Projects' : activeProject,
       subProjectName: activeSubProject,
-      activeKpi,
-      records: hierarchyFilteredRecords,
+      activeKpi: activeKpiName,
+      records: projectFilteredRecords,
       visibleColumns: portalData.visibleColumns || [],
-      scorecard,
-      subProjectBreakdown,
-      hierarchy: hierarchicalBreakdown,
+      scorecard: exportScorecard,
+      subProjectBreakdown: exportSubProjectBreakdown,
+      hierarchy: exportHierarchicalBreakdown,
       lastSyncedAt: portalData.lastSyncedAt,
     });
   };
@@ -369,7 +386,7 @@ export default function App() {
             <RefreshCw className="w-6 h-6" />
           </div>
           <h2 className="font-display font-bold text-slate-800 text-base">
-            Loading Client Portal &amp; KPI Engine
+            Loading Client Compliance Portal
           </h2>
           <p className="text-xs text-slate-500 mt-1">Connecting to SQLite database...</p>
         </div>
@@ -393,7 +410,7 @@ export default function App() {
             href="/"
             className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold transition-colors"
           >
-            <span>Return to Master Portal</span>
+            <span>Return to Portal</span>
           </a>
         </div>
       </div>
@@ -405,310 +422,129 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
-      {/* Top Bar Navigation */}
+      {/* Top Bar Navigation (Clean, Client-Centric) */}
       <TopBar
         mode={portalData?.mode || 'public'}
         linkMeta={portalData?.linkMeta}
         activeProject={activeProject}
         activeSubProject={activeSubProject}
+        projects={allProjects}
+        onSelectProject={(proj) => {
+          setActiveProject(proj);
+          setActiveSubProject('ALL');
+        }}
         lastSyncedAt={portalData?.lastSyncedAt || null}
-        isSyncing={isSyncing}
         isAdminLoggedIn={isAdminLoggedIn}
-        onSync={handleSyncNow}
         onExportPdf={handleExportPdf}
         onExportExcel={handleExportExcel}
-        onOpenShareModal={() => {
-          if (!adminPin) {
-            setPinPurpose('share_link');
-            setIsPinModalOpen(true);
-          } else {
-            setIsShareModalOpen(true);
-          }
-        }}
-        onOpenAdminModal={() => {
-          if (!adminPin) {
-            setPinPurpose('admin_center');
-            setIsPinModalOpen(true);
-          } else {
-            setIsAdminModalOpen(true);
-          }
-        }}
-        onOpenPinModal={() => {
-          setPinPurpose('admin_center');
-          setIsPinModalOpen(true);
-        }}
+        onOpenAdminModal={() => setIsAdminModalOpen(true)}
+        onOpenSyncModal={() => setIsSyncModalOpen(true)}
         onAdminLogout={handleAdminLogout}
       />
 
       {/* Main Viewport Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {/* Header Banner & Breadcrumb Filters */}
-        <div className="space-y-4">
-          {/* Master View Hierarchy Navigation */}
-          {!isClientMode ? (
-            <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)] space-y-3">
-              {/* Sheet Category Tabs */}
-              <div className="flex items-center justify-between flex-wrap gap-2 pb-3 border-b border-slate-100">
-                <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
-                  <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-1 shrink-0 flex items-center gap-1">
-                    <Layers className="w-3.5 h-3.5" /> Source Sheet:
-                  </span>
-                  <button
-                    onClick={() => {
-                      setActiveTab('ALL');
-                      setActiveProject('ALL');
-                      setActiveSubProject('ALL');
-                    }}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer shrink-0 ${
-                      activeTab === 'ALL'
-                        ? 'bg-slate-900 text-white font-semibold shadow-xs'
-                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                    }`}
-                  >
-                    All Tabs ({portalData?.records.length || 0})
-                  </button>
-                  {sheetTabs.map((tab) => {
-                    const tabCount = (portalData?.records || []).filter(
-                      (r) => r.sheet_tab === tab
-                    ).length;
-
-                    return (
-                      <button
-                        key={tab}
-                        onClick={() => {
-                          setActiveTab(tab);
-                          setActiveProject('ALL');
-                          setActiveSubProject('ALL');
-                        }}
-                        className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer shrink-0 ${
-                          activeTab === tab
-                            ? 'bg-slate-900 text-white font-semibold shadow-xs'
-                            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                        }`}
-                      >
-                        <span>{tab}</span>
-                        <span className="ml-1.5 font-mono text-[10px] opacity-75 tabular-nums">
-                          ({tabCount})
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="text-[11px] text-slate-400 font-medium">
-                  {portalData?.records.length || 0} total synchronized records
-                </div>
-              </div>
-
-              {/* Project & Sub-Project Dropdowns */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
-                    Select Project
-                  </label>
-                  <select
-                    value={activeProject}
-                    onChange={(e) => {
-                      setActiveProject(e.target.value);
-                      setActiveSubProject('ALL');
-                    }}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10 cursor-pointer"
-                  >
-                    <option value="ALL">All Projects (Combined View)</option>
-                    {allProjects.map((p) => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
-                    Filter Sub-Project / Location
-                  </label>
-                  <select
-                    value={activeSubProject}
-                    onChange={(e) => setActiveSubProject(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10 cursor-pointer"
-                  >
-                    <option value="ALL">All Sub-Projects / Sites</option>
-                    {(subProjectsByProject[activeProject] || []).map((sp) => (
-                      <option key={sp} value={sp}>
-                        {sp}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="flex items-end">
-                  <div className="w-full px-3 py-2 bg-emerald-50/60 border border-emerald-200/80 rounded-lg text-xs text-emerald-900 flex items-center justify-between">
-                    <span className="flex items-center gap-1.5 font-semibold">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                      <span>Active Workforce Only:</span>
-                    </span>
-                    <strong className="font-mono tabular-nums text-emerald-950 font-bold">
-                      {hierarchyFilteredRecords.length} Active Employees
-                    </strong>
-                  </div>
-                </div>
-              </div>
+        {/* Scope Context Banner (Client Friendly) */}
+        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center justify-center font-bold text-xs">
+              ✓
             </div>
-          ) : (
-            /* Client Locked View Header */
-            <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-[0_1px_2px_rgba(0,0,0,0.03)] flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                  <span className="text-xs font-semibold text-emerald-800 uppercase tracking-wider">
-                    Client Share Access Active
-                  </span>
-                </div>
-                <h1 className="font-display font-bold text-xl text-slate-900">
-                  {portalData.linkMeta?.client_label}
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="font-display font-bold text-sm text-slate-900">
+                  {isClientMode
+                    ? portalData?.linkMeta?.client_label
+                    : activeProject === 'ALL'
+                    ? 'All Corporate Client Projects'
+                    : `Project: ${activeProject}`}
                 </h1>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Project: <strong className="text-slate-800">{activeProject}</strong>
-                  {activeSubProject !== 'ALL' && (
-                    <>
-                      {' '}
-                      · Location: <strong className="text-slate-800">{activeSubProject}</strong>
-                    </>
-                  )}
-                </p>
+                <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                  Active Personnel Only
+                </span>
               </div>
-
-              {/* Sub-Project selector if client link allows ALL sub-projects */}
-              {portalData.linkMeta?.sub_project_name === 'ALL' &&
-                (subProjectsByProject[activeProject] || []).length > 0 && (
-                  <div className="w-full md:w-64">
-                    <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
-                      Filter Sub-Project Location:
-                    </label>
-                    <select
-                      value={activeSubProject}
-                      onChange={(e) => setActiveSubProject(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10 cursor-pointer"
-                    >
-                      <option value="ALL">All Sub-Projects</option>
-                      {(subProjectsByProject[activeProject] || []).map((sp) => (
-                        <option key={sp} value={sp}>
-                          {sp}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Monitoring compliance eligibility for active workforce across Iqama, Ajeer, and Health Card.
+              </p>
             </div>
-          )}
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs flex items-center gap-2">
+              <Users className="w-3.5 h-3.5 text-slate-500" />
+              <span className="text-slate-500">Active Workforce:</span>
+              <strong className="font-mono text-slate-900 tabular-nums">
+                {projectFilteredRecords.length} Employees
+              </strong>
+            </div>
+          </div>
         </div>
 
-        {/* Top Interactive KPI Cards */}
-        <KPICardStrip
-          scorecard={scorecard}
+        {/* 3 DEDICATED SCORECARDS (Iqama, Ajeer, Health Card) */}
+        <ClientKpiStrip
+          scorecards={coreScorecards}
+          activePillar={activePillar}
+          onSelectPillar={(pillar) => setActivePillar(pillar)}
           selectedStatus={selectedStatus}
           onSelectStatus={(status) => setSelectedStatus(status)}
         />
 
-        {/* KPI Element Selector Bar */}
-        {portalData?.kpiElements && portalData.kpiElements.length > 0 && (
-          <KPISelectorBar
-            kpiElements={portalData.kpiElements}
-            activeKpi={activeKpi}
-            onSelectKpi={(kpi) => setActiveKpi(kpi)}
-            filteredRecords={hierarchyFilteredRecords}
-          />
-        )}
-
-        {/* Sub-Project Compliance Breakdown Matrix */}
-        <SubProjectMatrix
-          hierarchy={hierarchicalBreakdown}
+        {/* TOP SECTION: Sub-Project & Work Site Compliance Progress */}
+        <SubProjectOverviewGrid
+          records={projectFilteredRecords}
           activeProject={activeProject}
           activeSubProject={activeSubProject}
-          onSelectProject={(proj) => {
-            setActiveProject(proj);
-            setActiveSubProject('ALL');
-          }}
-          onSelectSubProject={(proj, sub) => {
-            setActiveProject(proj);
-            setActiveSubProject(sub);
-          }}
-          activeKpi={activeKpi}
+          onSelectSubProject={(subName) => setActiveSubProject(subName)}
+          activePillar={activePillar}
         />
 
-        {/* Collapsible Detailed Employee Roster */}
-        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-          <div
-            onClick={() => setIsEmployeeRosterOpen(!isEmployeeRosterOpen)}
-            className="px-5 py-3.5 bg-gradient-to-r from-slate-50 to-slate-100/60 hover:bg-slate-100/90 border-b border-slate-200 flex items-center justify-between cursor-pointer transition-colors"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center shrink-0">
-                <Users className="w-4 h-4 text-emerald-400" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h4 className="font-display font-bold text-xs uppercase tracking-wider text-slate-900">
-                    Detailed Employee Roster (Active Workforce Only)
-                  </h4>
-                  <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/80 font-mono tabular-nums">
-                    {hierarchyFilteredRecords.length} Active Records
-                  </span>
-                  {activeProject !== 'ALL' && (
-                    <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                      Filter: {activeProject} {activeSubProject !== 'ALL' ? `· ${activeSubProject}` : ''}
-                    </span>
-                  )}
-                </div>
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  Drill-down inspection of approved columns for active personnel. Inactive and terminated employees are excluded.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:border-slate-300 text-xs font-semibold text-slate-700 shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <span>{isEmployeeRosterOpen ? 'Hide Individual Roster' : 'Show Individual Roster'}</span>
-                {isEmployeeRosterOpen ? (
-                  <ChevronUp className="w-3.5 h-3.5 text-slate-500" />
-                ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
-                )}
-              </button>
-            </div>
-          </div>
-
-          {isEmployeeRosterOpen && (
-            <div className="p-4 bg-slate-50/50">
-              <DataTable
-                records={hierarchyFilteredRecords}
-                visibleColumns={portalData?.visibleColumns || []}
-                activeKpi={activeKpi}
-                selectedStatus={selectedStatus}
-                onSelectStatus={(status) => setSelectedStatus(status)}
-                projectColumn={portalData?.projectColumn || 'PROJECT'}
-                subProjectColumn={portalData?.subProjectColumn || 'SUB PROJECTS'}
-              />
-            </div>
-          )}
-        </div>
+        {/* BOTTOM SECTION: Detailed Employee Compliance Status Roster */}
+        <EmployeeComplianceRoster
+          records={projectFilteredRecords}
+          activeProject={activeProject}
+          activeSubProject={activeSubProject}
+          activePillar={activePillar}
+          selectedStatus={selectedStatus}
+          onSelectStatus={(status) => setSelectedStatus(status)}
+          onClearSubProjectFilter={() => setActiveSubProject('ALL')}
+        />
       </main>
 
-      {/* Footer */}
-      <footer className="mt-auto border-t border-slate-200 bg-white py-6 text-center text-xs text-slate-400">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <span>
-            Zawitco Legal · Multi-Project Client Portal &amp; Automated KPI Scorecard Engine
-          </span>
-          <div className="flex items-center gap-4 text-slate-500">
-            <span>Confidential &amp; Proprietary</span>
+      {/* Footer (Clean & Discreet Admin Trigger) */}
+      <footer className="mt-auto border-t border-slate-200 bg-white py-6 text-xs text-slate-400">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span>Zawitco Legal · Client Compliance Portal &amp; Automated KPI Engine</span>
             <span>·</span>
-            <span className="font-mono tabular-nums">
-              Database: SQLite (portal_data.db)
-            </span>
+            <span className="text-slate-500">Confidential &amp; Proprietary</span>
+          </div>
+
+          <div className="flex items-center gap-4">
+            {isAdminLoggedIn ? (
+              <div className="flex items-center gap-2 text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200 text-[11px] font-medium">
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                <span>Admin Authenticated</span>
+                <button
+                  onClick={handleAdminLogout}
+                  className="ml-1 text-emerald-800 hover:text-emerald-950 font-bold underline cursor-pointer"
+                >
+                  Exit
+                </button>
+              </div>
+            ) : (
+              /* Discrete, hidden Staff Admin Trigger */
+              <button
+                onClick={() => {
+                  setPinPurpose('admin_center');
+                  setIsPinModalOpen(true);
+                }}
+                className="text-slate-400 hover:text-slate-600 text-[11px] flex items-center gap-1.5 transition-colors cursor-pointer select-none"
+                title="Staff PIN Authentication · Shortcut: Ctrl+Shift+A"
+              >
+                <Lock className="w-3 h-3 text-slate-400" />
+                <span>Staff Access</span>
+              </button>
+            )}
           </div>
         </div>
       </footer>
@@ -721,12 +557,12 @@ export default function App() {
         title={
           pinPurpose === 'portal_unlock'
             ? 'Master Portal Locked'
-            : 'Admin PIN Verification'
+            : 'Staff PIN Authentication'
         }
         description={
           pinPurpose === 'portal_unlock'
             ? 'The master portal is currently secured. Enter your 6-digit Admin PIN to view project data.'
-            : 'Enter Admin PIN to authenticate administrative operations.'
+            : 'Enter 6-digit Admin PIN to access administrative management and data synchronization.'
         }
       />
 
@@ -736,7 +572,7 @@ export default function App() {
         adminPin={adminPin}
         projects={allProjects}
         subProjectsByProject={subProjectsByProject}
-        sheetTabs={sheetTabs}
+        sheetTabs={portalData?.sheetTabs || []}
         initialProject={activeProject}
         onRequestPin={() => {
           setIsShareModalOpen(false);
@@ -759,6 +595,45 @@ export default function App() {
           loadPortalData();
         }}
       />
+
+      <SyncModal
+        isOpen={isSyncModalOpen}
+        onClose={() => setIsSyncModalOpen(false)}
+        adminPin={adminPin}
+        portalData={portalData}
+        onDataUpdated={(newData) => {
+          setPortalData(newData);
+          showToast('success', `Loaded ${newData.records?.length || 0} records into portal.`);
+        }}
+        onRequestPin={() => {
+          setIsSyncModalOpen(false);
+          setPinPurpose('sync');
+          setIsPinModalOpen(true);
+        }}
+      />
+
+      {/* Floating In-App Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom duration-200">
+          <div
+            className={`px-4 py-3 rounded-xl shadow-xl border text-xs font-medium flex items-center gap-3 max-w-md ${
+              toastMessage.type === 'success'
+                ? 'bg-emerald-950 text-emerald-100 border-emerald-700/80 shadow-emerald-950/20'
+                : toastMessage.type === 'error'
+                ? 'bg-rose-950 text-rose-100 border-rose-700/80 shadow-rose-950/20'
+                : 'bg-slate-900 text-slate-100 border-slate-700 shadow-slate-950/20'
+            }`}
+          >
+            <span>{toastMessage.text}</span>
+            <button
+              onClick={() => setToastMessage(null)}
+              className="ml-auto text-slate-400 hover:text-white p-1 cursor-pointer"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
