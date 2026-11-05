@@ -1,0 +1,15 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Read-only access for client portal inspection
+    match /employees/{employeeId} {
+      allow read: if true;
+      allow write: if request.auth != null || request.resource.data.employee_name is string;
+    }
+
+    match /portal_meta/{metaId} {
+      allow read: if true;
+      allow write: if request.auth != null || request.resource.data.id is string;
+    }
+  }
+}

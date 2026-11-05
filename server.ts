@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { getDb, queryAll, queryOne, executeRun, PortalConfig, ShareLink, RecordItem } from './src/server/db.js';
 import { syncGoogleSheetsData } from './src/server/sync.js';
+import { startSheetCollector } from './src/server/sheetCollector.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -504,6 +505,7 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running at http://0.0.0.0:${PORT}`);
+    startSheetCollector();
   });
 }
 

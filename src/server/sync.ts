@@ -274,6 +274,9 @@ export async function syncGoogleSheetsData(): Promise<{
         } else if (rowStr.includes('OUT OF RIYADH')) {
           currentTabBProject = 'Keemart Dark Store';
           currentSectionSubProject = 'DS OUT OF RIYADH';
+        } else if (rowStr.includes('RUH 003') || rowStr.includes('RUH003')) {
+          currentTabBProject = 'Keemart Dark Store';
+          currentSectionSubProject = 'DS RUH 003';
         } else if (rowStr.includes('RUH 002') || rowStr.includes('RUH002')) {
           currentTabBProject = 'Keemart Dark Store';
           currentSectionSubProject = 'DS RUH 002';
@@ -411,97 +414,22 @@ export async function syncGoogleSheetsData(): Promise<{
         }
       }
 
-      // Dynamically detect or assign project_name and sub_project_name
-      let projectName = '';
-      let subProjectName = 'MAIN';
-
-      if (tab.toLowerCase().includes('projects - b')) {
-        // Tab B: Keemart Dark Store (3 sub projects: DS RUH 001, DS RUH 002, DS OUT OF RIYADH), Keemart QC, Keemart DC
-        const subRaw = (explicitSubProject || rowObj['SUB PROJECTS'] || rowObj['SUB PROJECT'] || '').toUpperCase();
-        const reasonRaw = (rowObj['REASON OF RUNAWAY / TERMINATION'] || '').toUpperCase();
-        const desigRaw = (rowObj['DESIGNATION'] || '').toUpperCase();
-
-        if (
-          explicitProjectName.toUpperCase().includes('KEEMART QC') ||
-          subRaw.includes('KEEMART QC') ||
-          desigRaw.includes('QC') ||
-          currentTabBProject === 'Keemart QC'
-        ) {
-          projectName = 'Keemart QC';
-          subProjectName = 'KEEMART QC';
-        } else if (
-          explicitProjectName.toUpperCase().includes('KEEMART DC') ||
-          reasonRaw.includes('KEEMART DC') ||
-          desigRaw.includes('DC ') ||
-          desigRaw.includes('DC WAREHOUSE') ||
-          currentTabBProject === 'Keemart DC'
-        ) {
-          projectName = 'Keemart DC';
-          subProjectName = 'KEEMART DC';
+      // Strictly extract Main Project exclusively from 'PROJECT NAME' header
+      let projectName = explicitProjectName;
+      if (!projectName) {
+        if (tab.toLowerCase().includes('projects - b')) {
+          projectName = currentTabBProject || 'Keemart Dark Store';
+        } else if (tab.toLowerCase().includes('projects - c')) {
+          projectName = 'Ninja';
         } else {
-          projectName = 'Keemart Dark Store';
-          if (subRaw.includes('OUT OF RIYADH') || currentSectionSubProject === 'DS OUT OF RIYADH') {
-            subProjectName = 'DS OUT OF RIYADH';
-          } else if (subRaw.includes('RUH 002') || subRaw.includes('RUH002') || currentSectionSubProject === 'DS RUH 002') {
-            subProjectName = 'DS RUH 002';
-          } else {
-            subProjectName = 'DS RUH 001';
-          }
+          projectName = currentTabAProject && currentTabAProject !== 'TERMINATED' ? currentTabAProject : defaultTabProject;
         }
-      } else if (tab.toLowerCase().includes('projects - c')) {
-        // Tab C: Ninja (6 sub projects: NINJA HEAD OFFICE, NINJA RUH001, NINJA RUH002, NINJA WEST001, NINJA WEST002, NINJA NORTH001)
-        projectName = explicitProjectName || 'Ninja';
+      }
 
-        const subRaw = (explicitSubProject || rowObj['SUB PROJECT'] || '').toUpperCase();
-        const branchCode = (rowObj['BRANCH'] || '').toUpperCase();
-
-        if (subRaw.includes('HEAD OFFICE') || branchCode === 'H O' || branchCode === 'HO') {
-          subProjectName = 'NINJA HEAD OFFICE';
-        } else if (subRaw.includes('RUH001') || subRaw.includes('RUH 001')) {
-          subProjectName = 'NINJA RUH001';
-        } else if (subRaw.includes('RUH002') || subRaw.includes('RUH 002')) {
-          subProjectName = 'NINJA RUH002';
-        } else if (subRaw.includes('WEST001') || subRaw.includes('WEST 001')) {
-          subProjectName = 'NINJA WEST001';
-        } else if (subRaw.includes('WEST002') || subRaw.includes('WEST 002')) {
-          subProjectName = 'NINJA WEST002';
-        } else if (subRaw.includes('NORTH001') || subRaw.includes('NORTH 001')) {
-          subProjectName = 'NINJA NORTH001';
-        } else if (branchCode.startsWith('RUH')) {
-          subProjectName = currentSectionSubProject === 'NINJA RUH002' ? 'NINJA RUH002' : 'NINJA RUH001';
-        } else if (branchCode.startsWith('JED') || branchCode.startsWith('MDN') || branchCode.startsWith('MAK')) {
-          subProjectName = currentSectionSubProject === 'NINJA WEST002' ? 'NINJA WEST002' : 'NINJA WEST001';
-        } else if (branchCode.startsWith('DMM') || branchCode.startsWith('KHB') || branchCode.startsWith('HAS') || branchCode.startsWith('JUB')) {
-          subProjectName = 'NINJA NORTH001';
-        } else {
-          subProjectName = currentSectionSubProject || 'NINJA HEAD OFFICE';
-        }
-      } else {
-        // Tab A: Find 'PROJECT NAME' header from the master sheet (at the last end of data columns)
-        if (explicitProjectName) {
-          projectName = explicitProjectName;
-        } else if (currentTabAProject && currentTabAProject !== 'TERMINATED') {
-          projectName = currentTabAProject;
-        } else if (config.project_column && rowObj[config.project_column]) {
-          projectName = rowObj[config.project_column];
-        } else {
-          const projectKey = activeHeaders.find((h) => /^project(\s*name)?$/i.test(h));
-          projectName = (projectKey && rowObj[projectKey]) ? rowObj[projectKey] : defaultTabProject;
-        }
-        if (!projectName || projectName === '0' || projectName === '-' || projectName === 'Projects - A') {
-          projectName = 'General';
-        }
-
-        // Sub project from 'SUB PROJECT' header, or location from 'PROJECT' column
-        if (explicitSubProject) {
-          subProjectName = explicitSubProject;
-        } else {
-          const siteCol = activeHeaders.find((h) => /^project$/i.test(h));
-          subProjectName = (siteCol && rowObj[siteCol]) ? rowObj[siteCol] : 'MAIN';
-        }
-        if (!subProjectName || subProjectName === '0' || subProjectName === '-') {
-          subProjectName = 'MAIN';
-        }
+      // Strictly extract Sub-Project exclusively from 'SUB PROJECT' header
+      let subProjectName = explicitSubProject;
+      if (!subProjectName) {
+        subProjectName = 'MAIN';
       }
 
       rowObj['PROJECT'] = projectName;
@@ -706,6 +634,66 @@ export async function syncGoogleSheetsData(): Promise<{
     }
     if (fs.existsSync(path.dirname(docsPath))) {
       fs.writeFileSync(docsPath, serialized, 'utf8');
+    }
+
+    // Push updated snapshot directly to Cloud Firestore on zawitco-legal
+    try {
+      const cfgPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
+      if (fs.existsSync(cfgPath)) {
+        const fbCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+        const { initializeApp, getApps, getApp } = await import('firebase/app');
+        const { getFirestore, writeBatch, doc, setDoc } = await import('firebase/firestore');
+
+        const fbApp = getApps().length ? getApp() : initializeApp(fbCfg);
+        const fbDb = getFirestore(fbApp, fbCfg.firestoreDatabaseId);
+
+        const BATCH_SIZE = 350;
+        for (let i = 0; i < sanitizedRecords.length; i += BATCH_SIZE) {
+          const batch = writeBatch(fbDb);
+          const chunk = sanitizedRecords.slice(i, i + BATCH_SIZE);
+          for (const item of chunk) {
+            if (!item) continue;
+            const safeId = item.composite_id.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const docRef = doc(fbDb, 'employees', safeId);
+            batch.set(
+              docRef,
+              {
+                composite_id: item.composite_id,
+                sheet_tab: item.sheet_tab,
+                project_name: item.project_name,
+                sub_project_name: item.sub_project_name,
+                employee_name: item.data['EMPLOYEE NAME'] || 'Unnamed Employee',
+                erp_id: item.data['ERP ID'] || '',
+                mis: item.data['MIS'] || '',
+                ninja_picker_id: item.data['NINJA PICKER ID'] || '',
+                status: 'ACTIVE',
+                iqama_status: item.data['IQAMA STATUS'] || '',
+                data: item.data,
+                updated_at: timestamp,
+              },
+              { merge: true }
+            );
+          }
+          await batch.commit();
+        }
+
+        const metaRef = doc(fbDb, 'portal_meta', 'config');
+        await setDoc(
+          metaRef,
+          {
+            id: 'config',
+            last_synced_at: timestamp,
+            total_records: sanitizedRecords.length,
+            visible_columns: visibleCols,
+            sheet_tabs: sheetTabs,
+            updated_at: timestamp,
+          },
+          { merge: true }
+        );
+        console.log('[Firestore] Synced', sanitizedRecords.length, 'records directly to Cloud Firestore.');
+      }
+    } catch (fbErr) {
+      console.warn('Firestore sync failed, fallback active:', fbErr);
     }
   } catch (exportErr) {
     console.warn('Could not auto-write static portal-data.json files:', exportErr);

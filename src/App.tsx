@@ -21,6 +21,7 @@ import { ShareLinkModal } from './components/ShareLinkModal';
 import { AdminModal } from './components/AdminModal';
 import { SyncModal } from './components/SyncModal';
 import { isStaticHosting, getBackendUrl, safeApiFetch } from './services/api';
+import { subscribeToFirestoreEmployees, subscribeToFirestoreMeta } from './services/firebase';
 import {
   ShieldAlert,
   Lock,
@@ -88,7 +89,36 @@ export default function App() {
     }
   }, []);
 
-  // Fetch portal data
+  // Real-time Cloud Firestore subscription for live multi-device syncing
+  useEffect(() => {
+    const unsubEmployees = subscribeToFirestoreEmployees((liveRecords) => {
+      if (liveRecords && liveRecords.length > 0) {
+        setPortalData((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            records: liveRecords,
+            lastSyncCount: liveRecords.length,
+          };
+        });
+      }
+    });
+
+    const unsubMeta = subscribeToFirestoreMeta((liveMeta) => {
+      setPortalData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          ...liveMeta,
+        };
+      });
+    });
+
+    return () => {
+      unsubEmployees();
+      unsubMeta();
+    };
+  }, []);
   const loadPortalData = useCallback(async (currentPin?: string) => {
     setLoading(true);
     setError(null);

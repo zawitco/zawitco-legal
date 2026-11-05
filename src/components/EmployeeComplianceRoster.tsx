@@ -81,19 +81,39 @@ export const EmployeeComplianceRoster: React.FC<EmployeeComplianceRosterProps> =
         const desig = (rec.data['DESIGNATION'] || '').toLowerCase();
         const iqamaNo = (rec.data['IQAMA NO'] || '').toLowerCase();
         const site = (rec.data['SUB PROJECT'] || rec.data['SUB PROJECTS'] || '').toLowerCase();
+        const mis = (rec.data['MIS'] || rec.data['MIS ID'] || rec.data['MIS NO'] || '').toLowerCase();
+        const picker = (rec.data['NINJA PICKER ID'] || rec.data['PICKER ID'] || '').toLowerCase();
 
         return (
           name.includes(q) ||
           erp.includes(q) ||
           desig.includes(q) ||
           iqamaNo.includes(q) ||
-          site.includes(q)
+          site.includes(q) ||
+          mis.includes(q) ||
+          picker.includes(q)
         );
       }
 
       return true;
     });
   }, [records, activeSubProject, selectedStatus, activePillar, searchTerm]);
+
+  // Determine dynamic column header according to active project context
+  const isKeemartView =
+    activeProject.toLowerCase().includes('keemart') ||
+    activeSubProject.toUpperCase().startsWith('DS ') ||
+    activeSubProject.toUpperCase().startsWith('KEEMART');
+
+  const isNinjaView =
+    activeProject.toLowerCase().includes('ninja') ||
+    activeSubProject.toUpperCase().startsWith('NINJA');
+
+  const idColumnTitle = isKeemartView
+    ? 'MIS'
+    : isNinjaView
+    ? 'NINJA PICKER ID'
+    : 'MIS / PICKER ID';
 
   // Reset page when filters change
   React.useEffect(() => {
@@ -274,7 +294,10 @@ export const EmployeeComplianceRoster: React.FC<EmployeeComplianceRosterProps> =
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
               <th className="py-3 px-3 w-10 text-center font-mono">#</th>
-              <th className="py-3 px-3 min-w-[180px]">Employee Name</th>
+              <th className="py-3 px-3 min-w-[170px]">Employee Name</th>
+              <th className="py-3 px-3 font-mono min-w-[110px] text-slate-800 bg-slate-100/70 font-bold">
+                {idColumnTitle}
+              </th>
               <th className="py-3 px-3 font-mono">ERP ID</th>
               <th className="py-3 px-3">Designation / Role</th>
               <th className="py-3 px-3">Site / Sub-Project</th>
@@ -302,7 +325,7 @@ export const EmployeeComplianceRoster: React.FC<EmployeeComplianceRosterProps> =
           <tbody className="divide-y divide-slate-100">
             {paginatedEmployees.length === 0 ? (
               <tr>
-                <td colSpan={9} className="py-12 text-center text-slate-400">
+                <td colSpan={10} className="py-12 text-center text-slate-400">
                   <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                   <p className="font-semibold text-slate-600 text-sm">No employees match your search.</p>
                   <p className="text-xs text-slate-400 mt-1">Try adjusting the search query or status filter.</p>
@@ -316,6 +339,23 @@ export const EmployeeComplianceRoster: React.FC<EmployeeComplianceRosterProps> =
                 const desig = rec.data['DESIGNATION'] || 'Active Personnel';
                 const subProject = (rec.data['SUB PROJECT'] || rec.data['SUB PROJECTS'] || rec.sub_project_name || 'MAIN').trim();
                 const compliance = getEmployeeComplianceDetails(rec.data);
+
+                // Row-level MIS or Ninja Picker ID resolution
+                const rowProj = (rec.data['PROJECT NAME'] || rec.data['PROJECT'] || rec.project_name || '').trim();
+                const isRowKeemart = /keemart/i.test(rowProj) || /keemart/i.test(subProject) || /^DS /i.test(subProject);
+                const isRowNinja = /ninja/i.test(rowProj) || /^ninja/i.test(subProject);
+
+                const misVal = (rec.data['MIS'] || rec.data['MIS ID'] || rec.data['MIS NO'] || rec.data['MIS NUMBER'] || '').trim();
+                const pickerVal = (rec.data['NINJA PICKER ID'] || rec.data['PICKER ID'] || rec.data['NINJA ID'] || rec.data['PICKER'] || '').trim();
+
+                let dynamicId = '-';
+                if (isRowKeemart || isKeemartView) {
+                  dynamicId = misVal || '-';
+                } else if (isRowNinja || isNinjaView) {
+                  dynamicId = pickerVal || '-';
+                } else {
+                  dynamicId = misVal || pickerVal || '-';
+                }
 
                 return (
                   <tr
@@ -334,6 +374,17 @@ export const EmployeeComplianceRoster: React.FC<EmployeeComplianceRosterProps> =
                         <div className="text-[10px] text-slate-400 mt-0.5">
                           {rec.data['NATIONALITY']}
                         </div>
+                      )}
+                    </td>
+
+                    {/* Dynamic MIS / Ninja Picker ID Column directly beside Employee Name */}
+                    <td className="py-2.5 px-3 font-mono text-[11px] tabular-nums bg-slate-50/40">
+                      {dynamicId !== '-' ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded font-semibold bg-slate-100 text-slate-800 border border-slate-200">
+                          {dynamicId}
+                        </span>
+                      ) : (
+                        <span className="text-slate-300">-</span>
                       )}
                     </td>
 

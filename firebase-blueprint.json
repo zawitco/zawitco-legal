@@ -1,0 +1,48 @@
+{
+  "entities": {
+    "Employee": {
+      "title": "Employee",
+      "description": "Compliance and demographic record of an active personnel",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "composite_id": { "type": "string" },
+        "sheet_tab": { "type": "string" },
+        "project_name": { "type": "string" },
+        "sub_project_name": { "type": "string" },
+        "employee_name": { "type": "string" },
+        "erp_id": { "type": "string" },
+        "mis": { "type": "string" },
+        "ninja_picker_id": { "type": "string" },
+        "status": { "type": "string" },
+        "iqama_status": { "type": "string" },
+        "data": { "type": "object" },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["composite_id", "project_name", "sub_project_name", "employee_name"]
+    },
+    "PortalMeta": {
+      "title": "PortalMeta",
+      "description": "System metadata, active columns and sync state",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "last_synced_at": { "type": "string" },
+        "total_records": { "type": "number" },
+        "visible_columns": { "type": "array" },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["id", "updated_at"]
+    }
+  },
+  "firestore": {
+    "/employees/{employeeId}": {
+      "schema": "Employee",
+      "description": "Workforce compliance records across all projects and sub-projects"
+    },
+    "/portal_meta/{metaId}": {
+      "schema": "PortalMeta",
+      "description": "Global sync metadata and configuration state"
+    }
+  }
+}

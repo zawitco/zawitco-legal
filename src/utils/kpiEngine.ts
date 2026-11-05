@@ -483,7 +483,7 @@ export function calculateHierarchicalBreakdown(
 
     // Sort sub-projects canonically if known project
     if (projName === 'Keemart Dark Store') {
-      const order = ['DS RUH 001', 'DS RUH 002', 'DS OUT OF RIYADH'];
+      const order = ['DS RUH 001', 'DS RUH 002', 'DS RUH 003', 'DS OUT OF RIYADH'];
       subBreakdown.sort((a, b) => {
         const idxA = order.indexOf(a.subProjectName);
         const idxB = order.indexOf(b.subProjectName);
